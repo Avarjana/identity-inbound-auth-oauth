@@ -505,10 +505,9 @@ public class OAuth2Util {
         }
 
         String tenantDomain = null;
-        try {
+        AuthenticatedUser authenticatedUser = appDO.getAppOwner();
+        if (authenticatedUser != null) {
             tenantDomain = appDO.getAppOwner().getTenantDomain();
-        } catch (NullPointerException e) {
-            // Ignore and proceed.
         }
         if (tenantDomain != null && !isTenantActive(tenantDomain)) {
             log.error("Cannot retrieve application inside deactivated tenant: " + tenantDomain);
