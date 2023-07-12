@@ -24,7 +24,6 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.cxf.interceptor.InInterceptors;
 import org.apache.oltu.oauth2.as.response.OAuthASResponse;
-import org.apache.oltu.oauth2.as.response.OAuthASResponse.OAuthTokenResponseBuilder;
 import org.apache.oltu.oauth2.common.error.OAuthError;
 import org.apache.oltu.oauth2.common.exception.OAuthProblemException;
 import org.apache.oltu.oauth2.common.exception.OAuthSystemException;
@@ -32,6 +31,7 @@ import org.apache.oltu.oauth2.common.message.OAuthResponse;
 import org.apache.oltu.oauth2.common.message.types.GrantType;
 import org.wso2.carbon.context.PrivilegedCarbonContext;
 import org.wso2.carbon.identity.central.log.mgt.utils.LoggerUtils;
+import org.wso2.carbon.identity.core.util.IdentityTenantUtil;
 import org.wso2.carbon.identity.oauth.client.authn.filter.OAuthClientAuthenticatorProxy;
 import org.wso2.carbon.identity.oauth.common.OAuth2ErrorCodes;
 import org.wso2.carbon.identity.oauth.common.OAuthConstants;
@@ -45,6 +45,7 @@ import org.wso2.carbon.identity.oauth2.bean.OAuthClientAuthnContext;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2AccessTokenReqDTO;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2AccessTokenRespDTO;
 import org.wso2.carbon.identity.oauth2.model.CarbonOAuthTokenRequest;
+import org.wso2.carbon.identity.oauth2.token.handlers.response.OAuth2TokenResponse;
 
 import java.util.HashMap;
 import java.util.List;
@@ -89,7 +90,10 @@ public class OAuth2TokenEndpoint {
 
         Map<String, List<String>> paramMap;
         try {
-            startSuperTenantFlow();
+            // Start super tenant flow only if tenant qualified URLs are disabled.
+            if (!IdentityTenantUtil.isTenantQualifiedUrlsEnabled()) {
+                startSuperTenantFlow();
+            }
             paramMap = parseJsonTokenRequest(payload);
             if (LoggerUtils.isDiagnosticLogsEnabled()) {
                 Map<String, Object> params = new HashMap<>();
@@ -104,7 +108,9 @@ public class OAuth2TokenEndpoint {
             triggerOnTokenExceptionListeners(e, request, null);
             throw e;
         } finally {
-            PrivilegedCarbonContext.endTenantFlow();
+            if (!IdentityTenantUtil.isTenantQualifiedUrlsEnabled()) {
+                PrivilegedCarbonContext.endTenantFlow();
+            }
         }
         return issueAccessToken(request, paramMap);
     }
@@ -133,12 +139,21 @@ public class OAuth2TokenEndpoint {
             OAuthSystemException, InvalidRequestParentException {
 
         try {
-            startSuperTenantFlow();
+            // Start super tenant flow only if tenant qualified URLs are disabled.
+            if (!IdentityTenantUtil.isTenantQualifiedUrlsEnabled()) {
+                startSuperTenantFlow();
+            }
             validateRepeatedParams(request, paramMap);
             HttpServletRequestWrapper httpRequest = new OAuthRequestWrapper(request, paramMap);
-
             CarbonOAuthTokenRequest oauthRequest = buildCarbonOAuthTokenRequest(httpRequest);
-            validateOAuthApplication(oauthRequest.getoAuthClientAuthnContext());
+            OAuthClientAuthnContext oauthClientAuthnContext = oauthRequest.getoAuthClientAuthnContext();
+
+            if (!oauthClientAuthnContext.isAuthenticated()
+                    && OAuth2ErrorCodes.INVALID_CLIENT.equals(oauthClientAuthnContext.getErrorCode())) {
+                return handleBasicAuthFailure(oauthClientAuthnContext.getErrorMessage());
+            }
+
+            validateOAuthApplication(oauthClientAuthnContext);
             OAuth2AccessTokenRespDTO oauth2AccessTokenResp = issueAccessToken(oauthRequest, httpRequest);
 
             if (oauth2AccessTokenResp.getErrorMsg() != null) {
@@ -151,7 +166,9 @@ public class OAuth2TokenEndpoint {
             throw e;
 
         } finally {
-            PrivilegedCarbonContext.endTenantFlow();
+            if (!IdentityTenantUtil.isTenantQualifiedUrlsEnabled()) {
+                PrivilegedCarbonContext.endTenantFlow();
+            }
         }
     }
 
@@ -211,12 +228,13 @@ public class OAuth2TokenEndpoint {
             oauth2AccessTokenResp.setTokenType(BEARER);
         }
 
-        OAuthTokenResponseBuilder oAuthRespBuilder = OAuthASResponse
+        OAuth2TokenResponse.OAuthTokenResponseBuilder oAuthRespBuilder = OAuth2TokenResponse
                 .tokenResponse(HttpServletResponse.SC_OK)
                 .setAccessToken(oauth2AccessTokenResp.getAccessToken())
                 .setRefreshToken(oauth2AccessTokenResp.getRefreshToken())
                 .setExpiresIn(Long.toString(oauth2AccessTokenResp.getExpiresIn()))
                 .setTokenType(oauth2AccessTokenResp.getTokenType());
+
         oAuthRespBuilder.setScope(oauth2AccessTokenResp.getAuthorizedScopes());
 
         if (oauth2AccessTokenResp.getIDToken() != null) {
@@ -226,6 +244,11 @@ public class OAuth2TokenEndpoint {
         // Set custom parameters in token response if supported
         if (MapUtils.isNotEmpty(oauth2AccessTokenResp.getParameters())) {
             oauth2AccessTokenResp.getParameters().forEach(oAuthRespBuilder::setParam);
+        }
+
+        // Set custom parameters in token response if supported.
+        if (MapUtils.isNotEmpty(oauth2AccessTokenResp.getParameterObjects())) {
+            oauth2AccessTokenResp.getParameterObjects().forEach(oAuthRespBuilder::setParam);
         }
 
         OAuthResponse response = oAuthRespBuilder.buildJSONMessage();
