@@ -37,7 +37,7 @@ public class DefaultWebFingerProcessor implements WebFingerProcessor {
 
     private DefaultWebFingerProcessor() {
         if (log.isDebugEnabled()) {
-            log.debug("Initializing OIDCProcessor for OpenID connect discovery processor.");
+            log.debug("Initializing DefaultWebFingerProcessor for WebFinger request handling.");
         }
     }
 
@@ -57,26 +57,25 @@ public class DefaultWebFingerProcessor implements WebFingerProcessor {
         String errorCode = error.getErrorCode();
         if (WebFingerConstants.ERROR_CODE_INVALID_REQUEST.equals(errorCode)) {
             if (log.isDebugEnabled()) {
-                log.debug(error);
+                log.debug("Invalid WebFinger request received. Error code: {}", errorCode, error);
             }
             return HttpServletResponse.SC_BAD_REQUEST;
         } else if (WebFingerConstants.ERROR_CODE_INVALID_RESOURCE.equals(errorCode)) {
             if (log.isDebugEnabled()) {
-                log.debug(error);
+                log.debug("Invalid resource in WebFinger request. Error code: {}", errorCode, error);
             }
             return HttpServletResponse.SC_NOT_FOUND;
         } else if (WebFingerConstants.ERROR_CODE_JSON_EXCEPTION.equals(errorCode)) {
             if (log.isDebugEnabled()) {
-                log.debug(error);
+                log.debug("JSON processing error in WebFinger request. Error code: {}", errorCode, error);
             }
             return HttpServletResponse.SC_UNSUPPORTED_MEDIA_TYPE;
         } else if (WebFingerConstants.ERROR_CODE_NO_WEBFINGER_CONFIG.equals(errorCode)) {
-            log.error(WebFingerConstants.ERROR_MESSAGE_NO_WEBFINGER_CONFIG, error);
+            log.error("No WebFinger configuration found. Error code: {}", errorCode, error);
             return HttpServletResponse.SC_NOT_FOUND;
         } else {
-            log.error("Internal server error occured. ", error);
+            log.error("Internal server error occurred while processing WebFinger request. Error code: {}", errorCode, error);
             return HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
         }
-
     }
 }
