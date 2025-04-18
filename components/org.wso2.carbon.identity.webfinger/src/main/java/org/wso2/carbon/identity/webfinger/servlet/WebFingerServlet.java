@@ -39,10 +39,20 @@ import javax.servlet.http.HttpServletResponse;
  */
 public class WebFingerServlet extends HttpServlet {
     private static final Log log = LogFactory.getLog(WebFingerServlet.class);
+    
+    @Override
+    public void init() {
+        if (log.isDebugEnabled()) {
+            log.debug("Initializing WebFinger servlet for .well-known/webfinger endpoint");
+        }
+    }
 
     @Override
     protected void doGet(HttpServletRequest httpServletRequest,
                          HttpServletResponse httpServletResponse) throws IOException {
+        if (log.isDebugEnabled()) {
+            log.debug("Processing WebFinger GET request from: {}", httpServletRequest.getRemoteAddr());
+        }
         getOIDProviderIssuer(httpServletRequest, httpServletResponse);
     }
 
@@ -51,13 +61,21 @@ public class WebFingerServlet extends HttpServlet {
         WebFingerProcessor processor = WebFingerServiceComponentHolder.getWebFingerProcessor();
         String response = "";
         try {
+            if (log.isDebugEnabled()) {
+                log.debug("Building WebFinger response for request: {}", httpServletRequest.getQueryString());
+            }
             WebFingerResponseBuilder webFingerResponseBuilder = new JSONResponseBuilder();
             response = webFingerResponseBuilder.getOIDProviderIssuerString(processor.getResponse(httpServletRequest));
+            if (log.isDebugEnabled()) {
+                log.debug("Successfully built WebFinger response");
+            }
         } catch (WebFingerEndpointException e) {
+            log.warn("WebFinger endpoint exception while processing request: {}", httpServletRequest.getQueryString(), e);
             httpServletResponse.setStatus(processor.handleError(e));
             return;
         } catch (ServerConfigurationException e) {
-            log.error("Server Configuration error occurred.", e);
+            log.error("Server Configuration error occurred while processing WebFinger request: {}", 
+                    httpServletRequest.getQueryString(), e);
             httpServletResponse.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
             return;
         }

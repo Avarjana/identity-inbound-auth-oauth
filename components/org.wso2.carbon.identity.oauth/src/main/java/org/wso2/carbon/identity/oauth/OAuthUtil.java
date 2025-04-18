@@ -189,8 +189,7 @@ public final class OAuthUtil {
             clearOAuthCache(consumerKey, (AuthenticatedUser) authorizedUser);
         } else {
             if (LOG.isDebugEnabled()) {
-                LOG.debug("User object is not an instance of AuthenticatedUser therefore cannot resolve " +
-                        "authenticatedIDP name.");
+                LOG.debug("User object is not an instance of AuthenticatedUser, cannot resolve authenticatedIDP name");
             }
             AuthenticatedUser authenticatedUser = new AuthenticatedUser(authorizedUser);
             String userId;
@@ -198,9 +197,10 @@ public final class OAuthUtil {
                 userId = authenticatedUser.getUserId();
             } catch (UserIdNotFoundException e) {
                 // Masking getLoggableUserId as it will return the username because the user id is not available.
-                LOG.error("User id cannot be found for user: " + (LoggerUtils.isLogMaskingEnable ?
+                String maskedUser = LoggerUtils.isLogMaskingEnable ? 
                         LoggerUtils.getMaskedContent(authenticatedUser.getLoggableUserId()) :
-                        authenticatedUser.getLoggableUserId()));
+                        authenticatedUser.getLoggableUserId();
+                LOG.error("User id cannot be found for user: {}", maskedUser);
                 return;
             }
             clearOAuthCache(consumerKey, userId);
@@ -221,7 +221,7 @@ public final class OAuthUtil {
         try {
             userId = authorizedUser.getUserId();
         } catch (UserIdNotFoundException e) {
-            LOG.error("User id cannot be found for user: " + authorizedUser.getLoggableUserId());
+            LOG.error("User id cannot be found for user: {}", authorizedUser.getLoggableUserId());
             return;
         }
         clearOAuthCacheWithAuthenticatedIDP(consumerKey, userId, authenticatedIDP);
@@ -242,8 +242,7 @@ public final class OAuthUtil {
         } else {
             authenticatedIDP = null;
             if (LOG.isDebugEnabled()) {
-                LOG.debug("User object is not an instance of AuthenticatedUser therefore cannot resolve " +
-                        "authenticatedIDP name.");
+                LOG.debug("User object is not an instance of AuthenticatedUser, cannot resolve authenticatedIDP name");
             }
             AuthenticatedUser authenticatedUser = new AuthenticatedUser(authorizedUser);
             String userId;
@@ -275,7 +274,7 @@ public final class OAuthUtil {
         try {
             userId = authorizedUser.getUserId();
         } catch (UserIdNotFoundException e) {
-            LOG.error("User id cannot be found for user: " + authorizedUser.getLoggableUserId());
+            LOG.error("User id cannot be found for user: {}", authorizedUser.getLoggableUserId());
             return;
         }
         clearOAuthCacheWithAuthenticatedIDP(consumerKey, userId, scope, authenticatedIDP,
@@ -437,7 +436,7 @@ public final class OAuthUtil {
     public static void clearOAuthCache(AccessTokenDO accessTokenDO) {
 
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Clearing cache for access token as cache key of user: " +
+            LOG.debug("Clearing cache for access token as cache key of user: {}", 
                     accessTokenDO.getAuthzUser().getLoggableUserId());
         }
         OAuthCacheKey cacheKey = new OAuthCacheKey(accessTokenDO.getAccessToken());
@@ -580,7 +579,8 @@ public final class OAuthUtil {
             try {
                 oAuthEventInterceptorProxy.onPostTokenRevocationBySystem(accessTokenDO, params);
             } catch (IdentityOAuth2Exception e) {
-                LOG.error("Error while triggering listener for post token revocation by system.", e);
+                LOG.error("Error while triggering listener for post token revocation by system for token ID: {}", 
+                        accessTokenDO != null ? accessTokenDO.getTokenId() : "N/A", e);
             }
         }
     }
@@ -598,7 +598,8 @@ public final class OAuthUtil {
             try {
                 oAuthEventInterceptorProxy.onPreTokenRevocationBySystem(accessTokenDO, params);
             } catch (IdentityOAuth2Exception e) {
-                LOG.error("Error while triggering listener for pre token revocation by system.", e);
+                LOG.error("Error while triggering listener for pre token revocation by system for token ID: {}", 
+                        accessTokenDO != null ? accessTokenDO.getTokenId() : "N/A", e);
             }
         }
     }
@@ -618,7 +619,8 @@ public final class OAuthUtil {
             try {
                 oAuthEventInterceptorProxy.onPreTokenRevocationBySystem(userUUID, params);
             } catch (IdentityOAuth2Exception e) {
-                LOG.error("Error while triggering listener for pre token revocation by system.", e);
+                LOG.error("Error while triggering listener for pre token revocation by system for user UUID: {}", 
+                        userUUID, e);
             }
         }
     }
@@ -638,7 +640,8 @@ public final class OAuthUtil {
             try {
                 oAuthEventInterceptorProxy.onPostTokenRevocationBySystem(userUUID, params);
             } catch (IdentityOAuth2Exception e) {
-                LOG.error("Error while triggering listener for post token revocation by system.", e);
+                LOG.error("Error while triggering listener for post token revocation by system for user UUID: {}", 
+                        userUUID, e);
             }
         }
     }
@@ -693,9 +696,9 @@ public final class OAuthUtil {
                                 authorizationCode.getAuthzCodeId(), OAuthConstants.AuthorizationCodeState.REVOKED);
             }
         } catch (IdentityOAuth2Exception e) {
-            String errorMsg = "Error occurred while revoking authorization codes for user: " + username;
+            String errorMsg = String.format("Error occurred while revoking authorization codes for user: %s", username);
             if (LOG.isDebugEnabled()) {
-                LOG.debug(errorMsg);
+                LOG.debug(errorMsg, e);
             }
             throw new UserStoreException(errorMsg, e);
         }
@@ -722,7 +725,8 @@ public final class OAuthUtil {
         try {
             isOrganization = OrganizationManagementUtil.isOrganization(tenantDomain);
         } catch (OrganizationManagementException e) {
-            String msg = "Error occurred while check whether organization for the tenant : " + tenantDomain;
+            String msg = String.format("Error occurred while checking whether %s is an organization", tenantDomain);
+            LOG.error(msg, e);
             throw new UserStoreException(msg, e);
         }
 
@@ -901,8 +905,8 @@ public final class OAuthUtil {
                 Set<AccessTokenDO> accessTokenDOs = new HashSet<>();
                 try {
                     if (LOG.isDebugEnabled()) {
-                        LOG.debug("Retrieving all ACTIVE or EXPIRED access tokens for the client: " + clientId
-                                + " authorized by user: " + username + "/" + userStoreDomain);
+                        LOG.debug("Retrieving all ACTIVE or EXPIRED access tokens for client: {}, authorized by user: {}/{}",
+                                clientId, username, userStoreDomain);
                     }
                     // retrieve all ACTIVE or EXPIRED access tokens for particular client authorized by this user
                     accessTokenDOs.addAll(OAuthTokenPersistenceFactory.getInstance().getAccessTokenDAO()
@@ -915,8 +919,8 @@ public final class OAuthUtil {
                 }
 
                 if (LOG.isDebugEnabled() && CollectionUtils.isNotEmpty(accessTokenDOs)) {
-                    LOG.debug("ACTIVE or EXPIRED access tokens found for the client: " + clientId + " for the user: "
-                            + username);
+                    LOG.debug("ACTIVE or EXPIRED access tokens found for client: {} for user: {}", 
+                            clientId, username);
                 }
                 boolean isTokenPreservingAtPasswordUpdateEnabled =
                         Boolean.parseBoolean(IdentityUtil.getProperty(PRESERVE_LOGGED_IN_SESSION_AT_PASSWORD_UPDATE));
@@ -1015,7 +1019,9 @@ public final class OAuthUtil {
             throws UserStoreException {
 
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Request received for token revocation for the user: " + username + " roleId:" + roleId);
+            LOG.debug("Request received for token revocation for user: {}, roleId: {}, tenant domain: {}", 
+                    username, roleId != null ? roleId : "N/A", 
+                    IdentityTenantUtil.getTenantDomain(userStoreManager.getTenantId()));
         }
         String userStoreDomain = UserCoreUtil.getDomainName(userStoreManager.getRealmConfiguration());
         String tenantDomain = IdentityTenantUtil.getTenantDomain(userStoreManager.getTenantId());
@@ -1164,7 +1170,10 @@ public final class OAuthUtil {
      * @return true if revocation is successful. Else return false
      */
     public static boolean revokeTokens(String username, UserStoreManager userStoreManager) throws UserStoreException {
-
+        
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Revoking tokens for user: {}", username);
+        }
         return revokeTokens(username, userStoreManager, null);
     }
 
