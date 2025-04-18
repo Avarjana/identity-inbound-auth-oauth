@@ -1,30 +1,30 @@
 /*
+ * Copyright (c) 2017-2025, WSO2 LLC. (http://www.wso2.com).
  *
- *   Copyright (c) 2017, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *   WSO2 Inc. licenses this file to you under the Apache License,
- *   Version 2.0 (the "License"); you may not use this file except
- *   in compliance with the License.
- *   You may obtain a copy of the License at
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- *   Unless required by applicable law or agreed to in writing,
- *   software distributed under the License is distributed on an
- *   "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- *   KIND, either express or implied.  See the License for the
- *   specific language governing permissions and limitations
- *   under the License.
- * /
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.wso2.carbon.identity.oauth2.dao;
 
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang.ArrayUtils;
+import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.wso2.carbon.context.PrivilegedCarbonContext;
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
 import org.wso2.carbon.identity.application.common.IdentityApplicationManagementException;
 import org.wso2.carbon.identity.application.common.model.ServiceProvider;
@@ -40,6 +40,7 @@ import org.wso2.carbon.identity.oauth2.model.AccessTokenDO;
 import org.wso2.carbon.identity.oauth2.model.AccessTokenExtendedAttributes;
 import org.wso2.carbon.identity.oauth2.model.RefreshTokenValidationDataDO;
 import org.wso2.carbon.identity.oauth2.util.OAuth2Util;
+import org.wso2.carbon.identity.organization.management.service.exception.OrganizationManagementException;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -58,6 +59,7 @@ import java.util.TimeZone;
 import java.util.UUID;
 
 import static org.wso2.carbon.identity.oauth2.util.OAuth2Util.IS_EXTENDED_TOKEN;
+import static org.wso2.carbon.identity.oauth2.util.OAuth2Util.getUserResidentTenantDomain;
 import static org.wso2.carbon.identity.oauth2.util.OAuth2Util.isAccessTokenExtendedTableExist;
 
 /*
@@ -162,8 +164,27 @@ public class TokenManagementDAOImpl extends AbstractOAuthDAO implements TokenMan
             prepStmt = connection.prepareStatement(sql);
 
             prepStmt.setString(1, getPersistenceProcessor().getProcessedClientId(consumerKey));
+            int tenantId = IdentityTenantUtil.getLoginTenantId();
+            String applicationResidentOrgId = PrivilegedCarbonContext.getThreadLocalCarbonContext()
+                    .getApplicationResidentOrganizationId();
+            /*
+             If applicationResidentOrgId is not empty, then the request comes for an application which is registered
+             directly in the organization of the applicationResidentOrgId. Therefore, we need to resolve the
+             tenant domain of the organization to get the application tenant id.
+            */
+            if (StringUtils.isNotEmpty(applicationResidentOrgId)) {
+                try {
+                    String tenantDomain = OAuth2ServiceComponentHolder.getInstance().getOrganizationManager()
+                            .resolveTenantDomain(applicationResidentOrgId);
+                    tenantId = IdentityTenantUtil.getTenantId(tenantDomain);
+                } catch (OrganizationManagementException e) {
+                    throw new IdentityOAuth2Exception("Error while resolving tenant domain from the organization id: "
+                            + applicationResidentOrgId, e);
+                }
+            }
+            prepStmt.setInt(2, tenantId);
             if (refreshToken != null) {
-                prepStmt.setString(2, getHashingPersistenceProcessor().getProcessedRefreshToken(refreshToken));
+                prepStmt.setString(3, getHashingPersistenceProcessor().getProcessedRefreshToken(refreshToken));
             }
 
             resultSet = prepStmt.executeQuery();
@@ -181,10 +202,10 @@ public class TokenManagementDAOImpl extends AbstractOAuthDAO implements TokenMan
                         validationDataDO.setAccessToken(resultSet.getString(1));
                     }
                     String userName = resultSet.getString(2);
-                    int tenantId = resultSet.getInt(3);
+                    tenantId = resultSet.getInt(3);
                     String userDomain = resultSet.getString(4);
                     String tenantDomain = OAuth2Util.getTenantDomain(tenantId);
-
+                    validationDataDO.setRefreshToken(refreshToken);
                     validationDataDO.setScope(OAuth2Util.buildScopeArray(resultSet.getString(5)));
                     validationDataDO.setRefreshTokenState(resultSet.getString(6));
                     validationDataDO.setIssuedTime(
@@ -197,16 +218,28 @@ public class TokenManagementDAOImpl extends AbstractOAuthDAO implements TokenMan
                     validationDataDO.setAccessTokenIssuedTime(
                             resultSet.getTimestamp(13, Calendar.getInstance(TimeZone.getTimeZone(UTC))));
                     validationDataDO.setAccessTokenValidityInMillis(resultSet.getLong(14));
+                    String authorizedOrganization = resultSet.getString(15);
                     String authenticatedIDP = null;
                     if (OAuth2ServiceComponentHolder.isIDPIdColumnEnabled()) {
-                        authenticatedIDP = resultSet.getString(15);
+                        authenticatedIDP = resultSet.getString(16);
                     }
                     AuthenticatedUser user = OAuth2Util.createAuthenticatedUser(userName, userDomain, tenantDomain,
                             authenticatedIDP);
                     user.setAuthenticatedSubjectIdentifier(subjectIdentifier);
-                    if (isAccessTokenExtendedTableExist() && resultSet.getString(16) != null &&
-                            resultSet.getString(17) != null) {
-                        extendedParams.put(resultSet.getString(16), resultSet.getString(17));
+                    if (isAccessTokenExtendedTableExist() && resultSet.getString(17) != null &&
+                            resultSet.getString(18) != null) {
+                        extendedParams.put(resultSet.getString(17), resultSet.getString(18));
+                    }
+                    // For B2B users, the users tenant domain and user resident organization should be properly set.
+                    if (!OAuthConstants.AuthorizedOrganization.NONE.equals(authorizedOrganization)) {
+                        user.setAccessingOrganization(authorizedOrganization);
+                        user.setUserResidentOrganization(resolveOrganizationId(user.getTenantDomain()));
+                        /* Setting user's tenant domain as app residing tenant domain is not required once console is
+                            registered in each tenant. */
+                        String appResideOrg = getAppTenantDomain();
+                        if (StringUtils.isNotEmpty(appResideOrg) && user.isFederatedUser()) {
+                            user.setTenantDomain(appResideOrg);
+                        }
                     }
                     validationDataDO.setAuthorizedUser(user);
 
@@ -215,9 +248,9 @@ public class TokenManagementDAOImpl extends AbstractOAuthDAO implements TokenMan
                             !validationDataDO.getScope()[0].equals(resultSet.getString(5))) {
                         scopes.add(resultSet.getString(5));
                     }
-                    if (isAccessTokenExtendedTableExist() && resultSet.getString(16) != null &&
-                            resultSet.getString(17) != null) {
-                        extendedParams.put(resultSet.getString(16), resultSet.getString(17));
+                    if (isAccessTokenExtendedTableExist() && resultSet.getString(17) != null &&
+                            resultSet.getString(18) != null) {
+                        extendedParams.put(resultSet.getString(17), resultSet.getString(18));
                     }
                 }
 
@@ -316,6 +349,7 @@ public class TokenManagementDAOImpl extends AbstractOAuthDAO implements TokenMan
                     validationDataDO.setTokenId(tokenId);
                     validationDataDO.setGrantType(grantType);
                     validationDataDO.setTenantID(tenantId);
+                    validationDataDO.setRefreshToken(refreshToken);
                 } else {
                     scopes.add(resultSet.getString(5));
                 }
@@ -572,6 +606,7 @@ public class TokenManagementDAOImpl extends AbstractOAuthDAO implements TokenMan
         PreparedStatement updateStateStatement = null;
         PreparedStatement revokeActiveTokensStatement = null;
         PreparedStatement deactivateActiveCodesStatement = null;
+        int appTenantId = IdentityTenantUtil.getLoginTenantId();
         try {
             connection = IdentityDatabaseUtil.getDBConnection();
             if (OAuthConstants.ACTION_REVOKE.equals(action)) {
@@ -591,6 +626,7 @@ public class TokenManagementDAOImpl extends AbstractOAuthDAO implements TokenMan
                         (org.wso2.carbon.identity.oauth.dao.SQLQueries.OAuthAppDAOSQLQueries.UPDATE_APPLICATION_STATE);
                 updateStateStatement.setString(1, newAppState);
                 updateStateStatement.setString(2, consumerKey);
+                updateStateStatement.setInt(3, appTenantId);
                 updateStateStatement.execute();
 
             } else if (OAuthConstants.ACTION_REGENERATE.equals(action)) {
@@ -609,6 +645,7 @@ public class TokenManagementDAOImpl extends AbstractOAuthDAO implements TokenMan
                     updateStateStatement.setString(1, getPersistenceProcessor().getProcessedClientSecret(newSecretKey));
                     updateStateStatement.setString(2, properties.getProperty(OAuthConstants.OAUTH_APP_NEW_STATE));
                     updateStateStatement.setString(3, consumerKey);
+                    updateStateStatement.setInt(4, appTenantId);
                 } else {
                     // Update the consumer secret of the oauth app when the new app state is not available.
                     updateStateStatement = connection.prepareStatement
@@ -616,6 +653,7 @@ public class TokenManagementDAOImpl extends AbstractOAuthDAO implements TokenMan
                                     UPDATE_OAUTH_SECRET_KEY);
                     updateStateStatement.setString(1, getPersistenceProcessor().getProcessedClientSecret(newSecretKey));
                     updateStateStatement.setString(2, consumerKey);
+                    updateStateStatement.setInt(3, appTenantId);
                 }
                 updateStateStatement.execute();
 
@@ -635,6 +673,7 @@ public class TokenManagementDAOImpl extends AbstractOAuthDAO implements TokenMan
                         revokeActiveTokensStatement.setString(1, OAuthConstants.TokenStates.TOKEN_STATE_REVOKED);
                         revokeActiveTokensStatement.setString(2, UUID.randomUUID().toString());
                         revokeActiveTokensStatement.setString(3, consumerKey);
+                        revokeActiveTokensStatement.setInt(4, appTenantId);
                         int count = revokeActiveTokensStatement.executeUpdate();
                         if (log.isDebugEnabled()) {
                             log.debug("Number of rows being updated : " + count);
@@ -645,7 +684,8 @@ public class TokenManagementDAOImpl extends AbstractOAuthDAO implements TokenMan
                     revokeActiveTokensStatement.setString(1, OAuthConstants.TokenStates.TOKEN_STATE_REVOKED);
                     revokeActiveTokensStatement.setString(2, UUID.randomUUID().toString());
                     revokeActiveTokensStatement.setString(3, consumerKey);
-                    revokeActiveTokensStatement.setString(4, OAuthConstants.TokenStates.TOKEN_STATE_ACTIVE);
+                    revokeActiveTokensStatement.setInt(4, appTenantId);
+                    revokeActiveTokensStatement.setString(5, OAuthConstants.TokenStates.TOKEN_STATE_ACTIVE);
                     revokeActiveTokensStatement.execute();
                 }
             }
@@ -655,6 +695,7 @@ public class TokenManagementDAOImpl extends AbstractOAuthDAO implements TokenMan
             deactivateActiveCodesStatement = connection.prepareStatement(sqlQuery);
             deactivateActiveCodesStatement.setString(1, OAuthConstants.AuthorizationCodeState.REVOKED);
             deactivateActiveCodesStatement.setString(2, consumerKey);
+            deactivateActiveCodesStatement.setInt(3, appTenantId);
             deactivateActiveCodesStatement.executeUpdate();
 
             IdentityDatabaseUtil.commitTransaction(connection);
@@ -666,6 +707,91 @@ public class TokenManagementDAOImpl extends AbstractOAuthDAO implements TokenMan
             IdentityDatabaseUtil.closeStatement(updateStateStatement);
             IdentityDatabaseUtil.closeStatement(revokeActiveTokensStatement);
             IdentityDatabaseUtil.closeAllConnections(connection, null, deactivateActiveCodesStatement);
+        }
+    }
+
+    /**
+     * Revoke active access tokens issued against application.
+     *
+     * @param consumerKey    OAuth application consumer key.
+     * @param accessTokens   Active access tokens.
+     * @throws IdentityOAuth2Exception
+     * @throws IdentityApplicationManagementException
+     */
+    @Override
+    public void revokeTokens(String consumerKey, String[] accessTokens)
+            throws IdentityOAuth2Exception, IdentityApplicationManagementException {
+
+        if (log.isDebugEnabled()) {
+            log.debug("Updating state of client: " + consumerKey + " and revoking all access tokens.");
+        }
+        int appTenantId = IdentityTenantUtil.getLoginTenantId();
+        try (Connection connection = IdentityDatabaseUtil.getDBConnection()) {
+            //Revoke all active access tokens
+            if (ArrayUtils.isNotEmpty(accessTokens)) {
+                if (OAuth2Util.checkAccessTokenPartitioningEnabled() && OAuth2Util.checkUserNameAssertionEnabled()) {
+                    for (String token : accessTokens) {
+                        String sqlQuery = OAuth2Util.getTokenPartitionedSqlByToken(SQLQueries.REVOKE_APP_ACCESS_TOKEN,
+                                token);
+                        try (PreparedStatement revokeActiveTokensStatement = connection.prepareStatement(sqlQuery)) {
+                            revokeActiveTokensStatement.setString(1,
+                                    OAuthConstants.TokenStates.TOKEN_STATE_REVOKED);
+                            revokeActiveTokensStatement.setString(2, UUID.randomUUID().toString());
+                            revokeActiveTokensStatement.setString(3, consumerKey);
+                            revokeActiveTokensStatement.setInt(4, appTenantId);
+                            int count = revokeActiveTokensStatement.executeUpdate();
+                            if (log.isDebugEnabled()) {
+                                log.debug("Number of rows being updated : " + count);
+                            }
+                        }
+                    }
+                } else {
+                    try (PreparedStatement revokeActiveTokensStatement = connection.prepareStatement(SQLQueries.
+                            REVOKE_APP_ACCESS_TOKEN)) {
+                        revokeActiveTokensStatement.setString(1, OAuthConstants.TokenStates.
+                                TOKEN_STATE_REVOKED);
+                        revokeActiveTokensStatement.setString(2, UUID.randomUUID().toString());
+                        revokeActiveTokensStatement.setString(3, consumerKey);
+                        revokeActiveTokensStatement.setInt(4, appTenantId);
+                        revokeActiveTokensStatement.setString(5, OAuthConstants.TokenStates.
+                                TOKEN_STATE_ACTIVE);
+                        revokeActiveTokensStatement.execute();
+                    }
+                }
+            }
+            IdentityDatabaseUtil.commitTransaction(connection);
+        } catch (SQLException e) {
+            throw new IdentityApplicationManagementException("Error while revoking access tokens. ", e);
+        }
+    }
+
+    /**
+     * Revoke authorize codes issued against application.
+     *
+     * @param consumerKey          OAuth application consumer key.
+     * @param authorizationCodes   Active authorization codes.
+     * @throws IdentityApplicationManagementException
+     */
+    @Override
+    public void revokeAuthzCodes(String consumerKey, String[] authorizationCodes)
+            throws IdentityApplicationManagementException {
+
+        if (log.isDebugEnabled()) {
+            log.debug("Updating state of client: " + consumerKey + " and revoking all authorization codes.");
+        }
+        int appTenantId = IdentityTenantUtil.getLoginTenantId();
+        try (Connection connection = IdentityDatabaseUtil.getDBConnection()) {
+            try (PreparedStatement deactivateActiveCodesStatement =
+                         connection.prepareStatement(SQLQueries.UPDATE_AUTHORIZATION_CODE_STATE_FOR_CONSUMER_KEY)) {
+                //Deactivate all active authorization codes
+                deactivateActiveCodesStatement.setString(1, OAuthConstants.AuthorizationCodeState.REVOKED);
+                deactivateActiveCodesStatement.setString(2, consumerKey);
+                deactivateActiveCodesStatement.setInt(3, appTenantId);
+                deactivateActiveCodesStatement.executeUpdate();
+                IdentityDatabaseUtil.commitTransaction(connection);
+            }
+        } catch (SQLException e) {
+            throw new IdentityApplicationManagementException("Error while revoking authz codes.", e);
         }
     }
 
@@ -725,6 +851,7 @@ public class TokenManagementDAOImpl extends AbstractOAuthDAO implements TokenMan
             ps.setString(3, OAuthConstants.TokenStates.TOKEN_STATE_ACTIVE);
             ps.setString(4, consumerKey);
             ps.setInt(5, tenantId);
+            ps.setInt(6, IdentityTenantUtil.getLoginTenantId());
             ps.executeUpdate();
             IdentityDatabaseUtil.commitTransaction(connection);
         } catch (SQLException e) {
@@ -756,10 +883,13 @@ public class TokenManagementDAOImpl extends AbstractOAuthDAO implements TokenMan
         ResultSet rs = null;
         Set<String> distinctConsumerKeys = new HashSet<>();
         boolean isUsernameCaseSensitive = IdentityUtil.isUserStoreInUsernameCaseSensitive(authzUser.toString());
-        String tenantDomain = authzUser.getTenantDomain();
+        String tenantDomain = getUserResidentTenantDomain(authzUser);
         String tenantAwareUsernameWithNoUserDomain = authzUser.getUserName();
         String userDomain = OAuth2Util.getSanitizedUserStoreDomain(authzUser.getUserStoreDomain());
-
+        if (log.isDebugEnabled()) {
+            log.debug("Obtain the User's(" + tenantAwareUsernameWithNoUserDomain + ") tenant domain: " + tenantDomain
+                    + "/" + OAuth2Util.getTenantId(tenantDomain) + "and user-domain: " + userDomain);
+        }
         try {
             int tenantId = OAuth2Util.getTenantId(tenantDomain);
 
@@ -799,4 +929,19 @@ public class TokenManagementDAOImpl extends AbstractOAuthDAO implements TokenMan
         return distinctConsumerKeys;
     }
 
+    private String getAppTenantDomain() {
+
+        return IdentityTenantUtil.getTenantDomainFromContext();
+    }
+
+    private String resolveOrganizationId(String tenantDomain) throws IdentityOAuth2Exception {
+
+        try {
+            return OAuth2ServiceComponentHolder.getInstance().getOrganizationManager()
+                    .resolveOrganizationId(tenantDomain);
+        } catch (OrganizationManagementException e) {
+            throw new IdentityOAuth2Exception("Error occurred while resolving organization ID for the tenant domain: " +
+                    tenantDomain, e);
+        }
+    }
 }

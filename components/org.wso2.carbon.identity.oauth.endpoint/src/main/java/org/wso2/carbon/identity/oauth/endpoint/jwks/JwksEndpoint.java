@@ -1,7 +1,7 @@
 /*
- * Copyright (c) 2015, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
+ * Copyright (c) 2015-2024, WSO2 LLC. (http://www.wso2.com).
  *
- * WSO2 Inc. licenses this file to you under the Apache License,
+ * WSO2 LLC. licenses this file to you under the Apache License,
  * Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License.
  * You may obtain a copy of the License at
@@ -23,6 +23,7 @@ import com.nimbusds.jose.jwk.JWK;
 import com.nimbusds.jose.jwk.KeyUse;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.util.Base64;
+import com.nimbusds.jose.util.Base64URL;
 import net.minidev.json.JSONArray;
 import net.minidev.json.JSONObject;
 import org.apache.commons.lang.StringUtils;
@@ -37,9 +38,8 @@ import org.wso2.carbon.identity.oauth.common.OAuthConstants;
 import org.wso2.carbon.identity.oauth.config.OAuthServerConfiguration;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
 import org.wso2.carbon.identity.oauth2.util.OAuth2Util;
-import org.wso2.carbon.utils.CarbonUtils;
+import org.wso2.carbon.utils.security.KeystoreUtils;
 
-import java.io.FileInputStream;
 import java.security.KeyStore;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateEncodingException;
@@ -64,10 +64,11 @@ public class JwksEndpoint {
 
     private static final Log log = LogFactory.getLog(JwksEndpoint.class);
     private static final String KEY_USE = "sig";
-    private static final String SECURITY_KEY_STORE_LOCATION = "Security.KeyStore.Location";
-    private static final String SECURITY_KEY_STORE_PW = "Security.KeyStore.Password";
     private static final String KEYS = "keys";
     private static final String ADD_PREVIOUS_VERSION_KID = "JWTValidatorConfigs.JWKSEndpoint.AddPreviousVersionKID";
+    private static final String ENABLE_X5C_IN_RESPONSE = "JWTValidatorConfigs.JWKSEndpoint.EnableX5CInResponse";
+    public static final String JWKS_IS_THUMBPRINT_HEXIFY_REQUIRED = "JWTValidatorConfigs.JWKSEndpoint" +
+            ".IsThumbprintHexifyRequired";
 
     @GET
     @Path(value = "/jwks")
@@ -75,15 +76,13 @@ public class JwksEndpoint {
     public String jwks() {
 
         String tenantDomain = getTenantDomain();
-        String keystorePath = CarbonUtils.getServerConfiguration().getFirstProperty(SECURITY_KEY_STORE_LOCATION);
 
-        try (FileInputStream file = new FileInputStream(keystorePath)) {
+        try {
             final KeyStore keystore;
             List<CertificateInfo> certificateInfoList = new ArrayList<>();
             if (MultitenantConstants.SUPER_TENANT_DOMAIN_NAME.equalsIgnoreCase(tenantDomain)) {
-                keystore = KeyStore.getInstance(KeyStore.getDefaultType());
-                String password = CarbonUtils.getServerConfiguration().getFirstProperty(SECURITY_KEY_STORE_PW);
-                keystore.load(file, password.toCharArray());
+                KeyStoreManager keyStoreManager = KeyStoreManager.getInstance(MultitenantConstants.SUPER_TENANT_ID);
+                keystore = keyStoreManager.getPrimaryKeyStore();
             } else {
                 try {
                     int tenantId = IdentityTenantUtil.getTenantId(tenantDomain);
@@ -158,6 +157,7 @@ public class JwksEndpoint {
     private RSAKey.Builder getJWK(JWSAlgorithm algorithm, List<Base64> encodedCertList, X509Certificate certificate,
                                   String kidAlgorithm, String alias)
             throws ParseException, IdentityOAuth2Exception, JOSEException {
+
         RSAKey.Builder jwk = new RSAKey.Builder((RSAPublicKey) certificate.getPublicKey());
         if (kidAlgorithm.equals(OAuthConstants.SignatureAlgorithms.KID_HASHING_ALGORITHM)) {
             jwk.keyID(OAuth2Util.getKID(certificate, algorithm, getTenantDomain()));
@@ -166,9 +166,15 @@ public class JwksEndpoint {
         }
         jwk.algorithm(algorithm);
         jwk.keyUse(KeyUse.parse(KEY_USE));
-        jwk.x509CertChain(encodedCertList);
-        JWK parsedJWK = JWK.parse(certificate);
-        jwk.x509CertSHA256Thumbprint(parsedJWK.getX509CertSHA256Thumbprint());
+        if (Boolean.parseBoolean(IdentityUtil.getProperty(ENABLE_X5C_IN_RESPONSE))) {
+            jwk.x509CertChain(encodedCertList);
+        }
+        if (!Boolean.parseBoolean(IdentityUtil.getProperty(JWKS_IS_THUMBPRINT_HEXIFY_REQUIRED))) {
+            JWK parsedJWK = JWK.parse(certificate);
+            jwk.x509CertSHA256Thumbprint(parsedJWK.getX509CertSHA256Thumbprint());
+        } else {
+            jwk.x509CertSHA256Thumbprint(new Base64URL(OAuth2Util.getThumbPrint(certificate, alias)));
+        }
         return jwk;
     }
 
@@ -251,8 +257,7 @@ public class JwksEndpoint {
      */
     private String generateKSNameFromDomainName(String tenantDomain) {
 
-        String ksName = tenantDomain.trim().replace(".", "-");
-        return (ksName + ".jks");
+        return KeystoreUtils.getKeyStoreFileLocation(tenantDomain);
     }
 
     /**

@@ -18,13 +18,16 @@
 
 package org.wso2.carbon.identity.oauth.endpoint.util;
 
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.oltu.oauth2.common.error.OAuthError;
 import org.wso2.carbon.identity.application.authentication.framework.exception.FrameworkException;
+import org.wso2.carbon.identity.application.authentication.framework.handler.approles.exception.ApplicationRolesException;
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
+import org.wso2.carbon.identity.application.authentication.framework.util.FrameworkConstants;
 import org.wso2.carbon.identity.application.authentication.framework.util.FrameworkUtils;
 import org.wso2.carbon.identity.application.common.model.ClaimMapping;
 import org.wso2.carbon.identity.application.common.model.ServiceProvider;
@@ -45,9 +48,13 @@ import org.wso2.carbon.identity.oauth.user.UserInfoClaimRetriever;
 import org.wso2.carbon.identity.oauth.user.UserInfoEndpointException;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2TokenValidationResponseDTO;
+import org.wso2.carbon.identity.oauth2.internal.OAuth2ServiceComponentHolder;
 import org.wso2.carbon.identity.oauth2.model.AccessTokenDO;
+import org.wso2.carbon.identity.oauth2.util.AuthzUtil;
 import org.wso2.carbon.identity.oauth2.util.OAuth2Util;
 import org.wso2.carbon.identity.openidconnect.OIDCClaimUtil;
+import org.wso2.carbon.identity.organization.management.service.exception.OrganizationManagementException;
+import org.wso2.carbon.identity.organization.management.service.util.OrganizationManagementUtil;
 import org.wso2.carbon.user.api.RealmConfiguration;
 import org.wso2.carbon.user.api.UserStoreException;
 import org.wso2.carbon.user.core.UserRealm;
@@ -114,8 +121,9 @@ public class ClaimUtil {
             String subjectClaimValue = null;
 
             try {
-                AccessTokenDO accessTokenDO = OAuth2Util.getAccessTokenDOfromTokenIdentifier(
-                        OAuth2Util.getAccessTokenIdentifier(tokenResponse));
+                AccessTokenDO accessTokenDO = OAuth2ServiceComponentHolder.getInstance().getTokenProvider()
+                        .getVerifiedAccessToken(tokenResponse.getAuthorizationContextToken().getTokenString(),
+                                false);
                 userId = accessTokenDO.getAuthzUser().getUserId();
                 userTenantDomain = accessTokenDO.getAuthzUser().getTenantDomain();
 
@@ -133,19 +141,25 @@ public class ClaimUtil {
 
                 Map<String, String> spToLocalClaimMappings;
                 String clientId = getClientID(accessTokenDO);
-                OAuthAppDO oAuthAppDO = OAuth2Util.getAppInformationByClientId(clientId);
-                String spTenantDomain = OAuth2Util.getTenantDomainOfOauthApp(oAuthAppDO);
+                String spTenantDomain;
+                String appResidentTenantDomain = OAuth2Util.getAppResidentTenantDomain();
+                if (StringUtils.isNotEmpty(appResidentTenantDomain)) {
+                    spTenantDomain = appResidentTenantDomain;
+                } else {
+                    OAuthAppDO oAuthAppDO = OAuth2Util.getAppInformationByClientId(clientId);
+                    spTenantDomain = OAuth2Util.getTenantDomainOfOauthApp(oAuthAppDO);
+                }
 
                 ServiceProvider serviceProvider = OAuth2Util.getServiceProvider(clientId, spTenantDomain);
                 ClaimMapping[] requestedLocalClaimMappings = serviceProvider.getClaimConfig().getClaimMappings();
                 String subjectClaimURI = getSubjectClaimUri(serviceProvider, requestedLocalClaimMappings);
 
-                if (subjectClaimURI != null) {
+                if (StringUtils.isNotBlank(subjectClaimURI)) {
                     claimURIList.add(subjectClaimURI);
                 }
 
                 boolean isSubjectClaimInRequested = false;
-                if (subjectClaimURI != null || ArrayUtils.isNotEmpty(requestedLocalClaimMappings)) {
+                if (StringUtils.isNotBlank(subjectClaimURI) || ArrayUtils.isNotEmpty(requestedLocalClaimMappings)) {
                     if (requestedLocalClaimMappings != null) {
                         for (ClaimMapping claimMapping : requestedLocalClaimMappings) {
                             if (claimMapping.isRequested()) {
@@ -163,8 +177,34 @@ public class ClaimUtil {
                     spToLocalClaimMappings = ClaimMetadataHandler.getInstance().getMappingsMapFromOtherDialectToCarbon
                             (SP_DIALECT, null, userTenantDomain, true);
 
-                    realm = getUserRealm(null, userTenantDomain);
-                    Map<String, String> userClaims = getUserClaimsFromUserStore(userId, realm, claimURIList);
+                    Map<String, String> userClaims;
+                    AuthenticatedUser authenticatedUser = accessTokenDO.getAuthzUser();
+                    if (!StringUtils.equals(authenticatedUser.getUserResidentOrganization(),
+                            authenticatedUser.getAccessingOrganization()) &&
+                            StringUtils.isNotEmpty(AuthzUtil.getUserIdOfAssociatedUser(authenticatedUser))) {
+                        authenticatedUser.setSharedUserId(AuthzUtil.getUserIdOfAssociatedUser(authenticatedUser));
+                        authenticatedUser.setUserSharedOrganizationId(authenticatedUser
+                                .getAccessingOrganization());
+                    }
+                    if (OIDCClaimUtil.isSharedUserProfileResolverEnabled() &&
+                            OIDCClaimUtil.isSharedUserAccessingSharedOrg(authenticatedUser) &&
+                            StringUtils.isNotEmpty(authenticatedUser.getSharedUserId())) {
+                        String userAccessingTenantDomain =
+                                OIDCClaimUtil.resolveTenantDomain(authenticatedUser.getAccessingOrganization());
+                        String sharedUserId = authenticatedUser.getSharedUserId();
+                        realm = getUserRealm(null, userAccessingTenantDomain);
+                        try {
+                            FrameworkUtils.startTenantFlow(userAccessingTenantDomain);
+                            userClaims = getUserClaimsFromUserStoreWithResolvedRoles(authenticatedUser, serviceProvider,
+                                    sharedUserId, realm, claimURIList);
+                        } finally {
+                            FrameworkUtils.endTenantFlow();
+                        }
+                    } else {
+                        realm = getUserRealm(null, userTenantDomain);
+                        userClaims = getUserClaimsFromUserStoreWithResolvedRoles(authenticatedUser, serviceProvider,
+                                userId, realm, claimURIList);
+                    }
 
                     if (isNotEmpty(userClaims)) {
                         for (Map.Entry<String, String> entry : userClaims.entrySet()) {
@@ -188,7 +228,10 @@ public class ClaimUtil {
                                         continue;
                                     }
                                 }
-                                if (isMultiValuedAttribute(oidcClaimUri, claimValue)) {
+                                boolean isMultiValueSupportEnabledForUserinfoResponse = OAuthServerConfiguration
+                                        .getInstance().getUserInfoMultiValueSupportEnabled();
+                                if (isMultiValueSupportEnabledForUserinfoResponse &&
+                                        isMultiValuedAttribute(oidcClaimUri, claimValue)) {
                                     String[] attributeValues = processMultiValuedAttribute(claimValue);
                                     mappedAppClaims.put(oidcClaimUri, attributeValues);
                                 } else {
@@ -295,6 +338,42 @@ public class ClaimUtil {
                 userstore.getUserClaimValuesWithID(userId, claimURIList.toArray(new String[0]), null);
         if (log.isDebugEnabled()) {
             log.debug("User claims retrieved from user store: " + userClaims.size());
+        }
+        return userClaims;
+    }
+
+    private static Map<String, String> getUserClaimsFromUserStoreWithResolvedRoles(AuthenticatedUser authenticatedUser,
+                                                                                   ServiceProvider serviceProvider,
+                                                                                   String resolvedUserId,
+                                                                                   UserRealm realm,
+                                                                                   List<String> claimURIList)
+            throws UserStoreException {
+
+        Map<String, String> userClaims = getUserClaimsFromUserStore(resolvedUserId, realm, claimURIList);
+        try {
+            // Check whether the roles claim is requested.
+            boolean isRoleClaimRequested = CollectionUtils.isNotEmpty(claimURIList) &&
+                    claimURIList.contains(FrameworkConstants.ROLES_CLAIM);
+            String appTenantDomain = serviceProvider.getTenantDomain();
+            // Check whether the application is a shared app or an application created in sub org.
+            boolean isSubOrgApp = OrganizationManagementUtil.isOrganization(appTenantDomain);
+            // Resolving roles claim for sub org apps and shared apps since backward compatibility is not needed.
+            if (isRoleClaimRequested && isSubOrgApp) {
+                String[] appAssociatedRoles = OIDCClaimUtil.getAppAssociatedRolesOfUser(authenticatedUser,
+                        serviceProvider.getApplicationResourceId());
+                if (appAssociatedRoles != null && appAssociatedRoles.length > 0) {
+                    // If application associated roles are returned, set the roles claim using resolved roles.
+                    userClaims.put(FrameworkConstants.ROLES_CLAIM,
+                            String.join(FrameworkUtils.getMultiAttributeSeparator(), appAssociatedRoles));
+                } else {
+                    // If no roles are returned, remove the roles claim from user claims.
+                    userClaims.remove(FrameworkConstants.ROLES_CLAIM);
+                }
+            }
+        } catch (ApplicationRolesException e) {
+            throw new UserStoreException("Error while retrieving application associated roles for user.", e);
+        } catch (OrganizationManagementException e) {
+            throw new UserStoreException("Error while checking whether application tenant domain is an organization.");
         }
         return userClaims;
     }

@@ -79,8 +79,6 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static org.wso2.carbon.registry.core.jdbc.DumpConstants.RESOURCE;
-
 /**
  * This class implements Scope Validator which represents the functions related to a scope issuer which
  * issues scopes based on user roles.
@@ -88,6 +86,7 @@ import static org.wso2.carbon.registry.core.jdbc.DumpConstants.RESOURCE;
 public class RoleBasedScopeIssuer extends AbstractRoleBasedScopeIssuer implements ScopeValidator {
 
     private static final Log log = LogFactory.getLog(RoleBasedScopeIssuer.class);
+    private static final String RESOURCE = "resource";
     private static final String DEFAULT_SCOPE_NAME = "default";
     private static final String PRESERVED_CASE_SENSITIVE_VARIABLE = "preservedCaseSensitive";
     private static final String ACCESS_TOKEN_DO = "AccessTokenDO";
@@ -108,6 +107,9 @@ public class RoleBasedScopeIssuer extends AbstractRoleBasedScopeIssuer implement
     public boolean validateScope(OAuthAuthzReqMessageContext oAuthAuthzReqMessageContext) throws
             IdentityOAuth2Exception {
 
+        if (!OAuthServerConfiguration.getInstance().isRoleBasedScopeIssuerEnabled()) {
+            return true;
+        }
         List<String> authScopes = getScopes(oAuthAuthzReqMessageContext);
         oAuthAuthzReqMessageContext.setApprovedScope(authScopes.toArray(new String[0]));
         return true;
@@ -117,6 +119,9 @@ public class RoleBasedScopeIssuer extends AbstractRoleBasedScopeIssuer implement
     public boolean validateScope(OAuthTokenReqMessageContext oAuthTokenReqMessageContext) throws
             IdentityOAuth2Exception {
 
+        if (!OAuthServerConfiguration.getInstance().isRoleBasedScopeIssuerEnabled()) {
+            return true;
+        }
         String grantType = oAuthTokenReqMessageContext.getOauth2AccessTokenReqDTO().getGrantType();
         boolean isRefreshRequest = OAuthConstants.GrantTypes.REFRESH_TOKEN.equals(grantType);
         boolean isFederatedUser = oAuthTokenReqMessageContext.getAuthorizedUser().isFederatedUser();
@@ -132,6 +137,9 @@ public class RoleBasedScopeIssuer extends AbstractRoleBasedScopeIssuer implement
     public boolean validateScope(OAuth2TokenValidationMessageContext oAuth2TokenValidationMessageContext) throws
             IdentityOAuth2Exception {
 
+        if (!OAuthServerConfiguration.getInstance().isRoleBasedScopeIssuerEnabled()) {
+            return true;
+        }
         AccessTokenDO accessTokenDO = (AccessTokenDO) oAuth2TokenValidationMessageContext.getProperty(ACCESS_TOKEN_DO);
         if (accessTokenDO == null) {
             return false;

@@ -1,7 +1,7 @@
 /*
- * Copyright (c) 2019, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
+ * Copyright (c) 2019-2025, WSO2 LLC. (http://www.wso2.com).
  *
- * WSO2 Inc. licenses this file to you under the Apache License,
+ * WSO2 LLC. licenses this file to you under the Apache License,
  * Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License.
  * You may obtain a copy of the License at
@@ -11,7 +11,7 @@
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
+ * KIND, either express or implied.  See the License for the
  * specific language governing permissions and limitations
  * under the License.
  */
@@ -22,18 +22,25 @@ import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.wso2.carbon.base.MultitenantConstants;
 import org.wso2.carbon.context.PrivilegedCarbonContext;
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
 import org.wso2.carbon.identity.application.common.IdentityApplicationManagementException;
 import org.wso2.carbon.identity.application.common.model.ServiceProvider;
+import org.wso2.carbon.identity.application.common.model.ServiceProviderProperty;
+import org.wso2.carbon.identity.application.mgt.ApplicationConstants;
+import org.wso2.carbon.identity.central.log.mgt.utils.LogConstants;
 import org.wso2.carbon.identity.central.log.mgt.utils.LoggerUtils;
+import org.wso2.carbon.identity.core.util.IdentityTenantUtil;
 import org.wso2.carbon.identity.core.util.IdentityUtil;
 import org.wso2.carbon.identity.oauth.common.OAuthConstants;
 import org.wso2.carbon.identity.oauth.common.exception.InvalidOAuthClientException;
 import org.wso2.carbon.identity.oauth.config.OAuthServerConfiguration;
+import org.wso2.carbon.identity.oauth.dao.OAuthAppDO;
+import org.wso2.carbon.identity.oauth.tokenprocessor.TokenProvider;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
+import org.wso2.carbon.identity.oauth2.OAuth2Constants;
 import org.wso2.carbon.identity.oauth2.authcontext.AuthorizationContextTokenGenerator;
-import org.wso2.carbon.identity.oauth2.dao.OAuthTokenPersistenceFactory;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2ClientApplicationDTO;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2IntrospectionResponseDTO;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2TokenValidationRequestDTO;
@@ -41,12 +48,17 @@ import org.wso2.carbon.identity.oauth2.dto.OAuth2TokenValidationResponseDTO;
 import org.wso2.carbon.identity.oauth2.internal.OAuth2ServiceComponentHolder;
 import org.wso2.carbon.identity.oauth2.model.AccessTokenDO;
 import org.wso2.carbon.identity.oauth2.util.OAuth2Util;
+import org.wso2.carbon.identity.organization.management.service.exception.OrganizationManagementException;
+import org.wso2.carbon.identity.organization.management.service.util.OrganizationManagementUtil;
+import org.wso2.carbon.utils.DiagnosticLog;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
+import static org.wso2.carbon.identity.application.mgt.ApplicationConstants.IS_FRAGMENT_APP;
 import static org.wso2.carbon.identity.oauth2.util.OAuth2Util.isParsableJWT;
 
 /**
@@ -59,7 +71,9 @@ public class TokenValidationHandler {
     AuthorizationContextTokenGenerator tokenGenerator = null;
     private static final Log log = LogFactory.getLog(TokenValidationHandler.class);
     private Map<String, OAuth2TokenValidator> tokenValidators = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+    private TokenProvider tokenValidationProcessor;
     private static final String BEARER_TOKEN_TYPE = "Bearer";
+    private static final String DPOP_TOKEN_TYPE = "DPoP";
     private static final String BEARER_TOKEN_TYPE_JWT = "jwt";
     private static final String BUILD_FQU_FROM_SP_CONFIG = "OAuth.BuildSubjectIdentifierFromSPConfig";
     private static final String ENABLE_JWT_TOKEN_VALIDATION = "OAuth.EnableJWTTokenValidationDuringIntrospection";
@@ -116,6 +130,7 @@ public class TokenValidationHandler {
                 log.error(errorMsg, e);
             }
         }
+        tokenValidationProcessor = OAuth2ServiceComponentHolder.getInstance().getTokenProvider();
     }
 
     public static TokenValidationHandler getInstance() {
@@ -173,7 +188,8 @@ public class TokenValidationHandler {
         }
 
         try {
-            accessTokenDO = OAuth2Util.findAccessToken(requestDTO.getAccessToken().getIdentifier(), false);
+            accessTokenDO = OAuth2ServiceComponentHolder.getInstance().getTokenProvider()
+                    .getVerifiedAccessToken(requestDTO.getAccessToken().getIdentifier(), false);
         } catch (IllegalArgumentException e) {
             // Access token not found in the system.
             return buildClientAppErrorResponse(e.getMessage());
@@ -270,7 +286,8 @@ public class TokenValidationHandler {
         // Adding the AccessTokenDO as a context property for further use
         AccessTokenDO accessTokenDO;
         try {
-            accessTokenDO = OAuth2Util.findAccessToken(oAuth2Token.getIdentifier(), true);
+            accessTokenDO = OAuth2ServiceComponentHolder.getInstance().getTokenProvider()
+                    .getVerifiedAccessToken(oAuth2Token.getIdentifier(), true);
             if (accessTokenDO != null) {
                 messageContext.addProperty(OAuthConstants.ACCESS_TOKEN_DO, accessTokenDO);
             }
@@ -310,17 +327,35 @@ public class TokenValidationHandler {
         // If there aren't any active tokens, then there should be an error or exception. If no error or exception
         // as well, that means this token is not active. So show the generic error.
         if (!introResp.isActive()) {
+            DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = null;
+            if (LoggerUtils.isDiagnosticLogsEnabled()) {
+                diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                        OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                        OAuthConstants.LogConstants.ActionIDs.VALIDATE_ACCESS_TOKEN);
+                diagnosticLogBuilder.logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION)
+                        .resultStatus(DiagnosticLog.ResultStatus.FAILED);
+            }
             if (introResp.getError() != null) {
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, null,
-                        OAuthConstants.LogConstants.FAILED, introResp.getError(), "validate-token", null);
+                // diagnosticLogBuilder is not null only if diagnostic logs are enabled.
+                if (diagnosticLogBuilder != null) {
+                    diagnosticLogBuilder.resultMessage(introResp.getError());
+                    LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
+                }
                 return introResp;
             } else if (exception != null) {
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, null,
-                        OAuthConstants.LogConstants.FAILED, "System error occurred.", "validate-token", null);
+                // diagnosticLogBuilder is not null only if diagnostic logs are enabled.
+                if (diagnosticLogBuilder != null) {
+                    diagnosticLogBuilder.inputParam(LogConstants.InputKeys.ERROR_MESSAGE, exception.getMessage())
+                            .resultMessage("System error occurred.");
+                    LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
+                }
                 throw new IdentityOAuth2Exception("Error occurred while validating token.", exception);
             } else {
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, null,
-                        OAuthConstants.LogConstants.FAILED, "Token validation failed.", "validate-token", null);
+                // diagnosticLogBuilder is not null only if diagnostic logs are enabled.
+                if (diagnosticLogBuilder != null) {
+                    diagnosticLogBuilder.resultMessage("Token validation failed.");
+                    LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
+                }
                 return buildIntrospectionErrorResponse("Token validation failed");
             }
         }
@@ -351,25 +386,40 @@ public class TokenValidationHandler {
 
         OAuth2IntrospectionResponseDTO introResp = new OAuth2IntrospectionResponseDTO();
         AccessTokenDO refreshTokenDataDO;
-
+        DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = null;
+        if (LoggerUtils.isDiagnosticLogsEnabled()) {
+            diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                    OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                    OAuthConstants.LogConstants.ActionIDs.VALIDATE_REFRESH_TOKEN);
+            diagnosticLogBuilder.logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION)
+                    .resultStatus(DiagnosticLog.ResultStatus.FAILED);
+        }
         try {
             refreshTokenDataDO = findRefreshToken(validationRequest.getAccessToken().getIdentifier());
         } catch (IllegalArgumentException e) {
             // Refresh token not found in the system.
-            LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, null,
-                    OAuthConstants.LogConstants.FAILED, "Provided token is not a valid refresh token.",
-                    "validate-refresh-token", null);
+            if (diagnosticLogBuilder != null) {
+                // diagnosticLogBuilder is not null only if diagnostic logs are enabled.
+                diagnosticLogBuilder.inputParam(LogConstants.InputKeys.ERROR_MESSAGE, e.getMessage())
+                        .resultMessage("Provided token is not a valid refresh token.");
+                LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
+            }
             return buildIntrospectionErrorResponse(e.getMessage());
         }
 
         if (refreshTokenDataDO == null || hasRefreshTokenExpired(refreshTokenDataDO)) {
             if (refreshTokenDataDO == null) {
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, null,
-                        OAuthConstants.LogConstants.FAILED, "Provided token is not a valid refresh token.",
-                        "validate-refresh-token", null);
+                if (diagnosticLogBuilder != null) {
+                    // diagnosticLogBuilder is not null only if diagnostic logs are enabled.
+                    diagnosticLogBuilder.resultMessage("Provided token is not a valid refresh token.");
+                    LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
+                }
             } else if (hasRefreshTokenExpired(refreshTokenDataDO)) {
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, null,
-                        OAuthConstants.LogConstants.FAILED, "Token is expired.", "validate-refresh-token", null);
+                if (diagnosticLogBuilder != null) {
+                    // diagnosticLogBuilder is not null only if diagnostic logs are enabled.
+                    diagnosticLogBuilder.resultMessage("Token is expired.");
+                    LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
+                }
             }
             // Token is not active. we do not need to worry about other details.
             introResp.setActive(false);
@@ -417,12 +467,20 @@ public class TokenValidationHandler {
     private OAuth2IntrospectionResponseDTO validateAccessToken(OAuth2TokenValidationMessageContext messageContext,
                                                                OAuth2TokenValidationRequestDTO validationRequest,
                                                                OAuth2TokenValidator tokenValidator)
-            throws IdentityOAuth2Exception {
+            throws IdentityOAuth2Exception, IdentityApplicationManagementException, InvalidOAuthClientException {
 
         OAuth2IntrospectionResponseDTO introResp = new OAuth2IntrospectionResponseDTO();
         AccessTokenDO accessTokenDO = null;
         List<String> requestedAllowedScopes = new ArrayList<>();
 
+        DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = null;
+        if (LoggerUtils.isDiagnosticLogsEnabled()) {
+            diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                    OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                    OAuthConstants.LogConstants.ActionIDs.VALIDATE_ACCESS_TOKEN);
+            diagnosticLogBuilder.logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION)
+                    .resultStatus(DiagnosticLog.ResultStatus.FAILED);
+        }
         if (messageContext.getProperty(OAuth2Util.REMOTE_ACCESS_TOKEN) != null
                 && "true".equalsIgnoreCase((String) messageContext.getProperty(OAuth2Util.REMOTE_ACCESS_TOKEN))) {
             // this can be a self-issued JWT or any access token issued by a trusted OAuth authorization server.
@@ -452,12 +510,25 @@ public class TokenValidationHandler {
         } else {
             try {
                 String tenantDomain = PrivilegedCarbonContext.getThreadLocalCarbonContext().getTenantDomain();
-                accessTokenDO = OAuth2Util.findAccessToken(validationRequest.getAccessToken().getIdentifier(),
-                        false);
+                accessTokenDO = OAuth2ServiceComponentHolder.getInstance().getTokenProvider()
+                        .getVerifiedAccessToken(validationRequest.getAccessToken().getIdentifier(), false);
+                /*
+                 Check if the OAuth application is a fragment application. If that is not a fragment application,
+                 then getting the tenant domain from the token.
+                */
+                String appTenantDomain = IdentityTenantUtil.getTenantDomain(accessTokenDO.getTenantID());
+                if (OrganizationManagementUtil.isOrganization(appTenantDomain)) {
+                    ServiceProviderProperty[] serviceProviderProperties = OAuth2Util.getServiceProvider(
+                            accessTokenDO.getConsumerKey(), appTenantDomain).getSpProperties();
+                    if (!isFragmentApp(serviceProviderProperties)) {
+                        tenantDomain = appTenantDomain;
+                    }
+                }
                 boolean isCrossTenantTokenIntrospectionAllowed
                         = OAuthServerConfiguration.getInstance().isCrossTenantTokenIntrospectionAllowed();
                 if (!isCrossTenantTokenIntrospectionAllowed && accessTokenDO != null &&
-                        !tenantDomain.equalsIgnoreCase(accessTokenDO.getAuthzUser().getTenantDomain())) {
+                        !tenantDomain.equalsIgnoreCase(accessTokenDO.getAuthzUser().getTenantDomain()) &&
+                        StringUtils.isEmpty(accessTokenDO.getAuthzUser().getAccessingOrganization())) {
                     throw new IllegalArgumentException("Invalid Access Token. ACTIVE access token is not found.");
                 }
                 List<String> allowedScopes = OAuthServerConfiguration.getInstance().getAllowedScopes();
@@ -475,15 +546,24 @@ public class TokenValidationHandler {
                 }
             } catch (IllegalArgumentException e) {
                 // access token not found in the system.
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, null,
-                        OAuthConstants.LogConstants.FAILED, "Provided token is not a valid access token.",
-                        "validate-access-token", null);
+                if (diagnosticLogBuilder != null) {
+                    // diagnosticLogBuilder is not null only if diagnostic logs are enabled.
+                    diagnosticLogBuilder.inputParam(LogConstants.InputKeys.ERROR_MESSAGE, e.getMessage())
+                            .resultMessage("Provided token is not a valid access token.");
+                    LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
+                }
                 return buildIntrospectionErrorResponse(e.getMessage());
+            } catch (OrganizationManagementException e) {
+                throw new IdentityOAuth2Exception("Error while checking whether the application tenant is an " +
+                        "organization.", e);
             }
 
             if (hasAccessTokenExpired(accessTokenDO)) {
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, null,
-                        OAuthConstants.LogConstants.FAILED, "Access token is expired.", "validate-access-token", null);
+                if (diagnosticLogBuilder != null) {
+                    // diagnosticLogBuilder is not null only if diagnostic logs are enabled.
+                    diagnosticLogBuilder.resultMessage("Token is expired.");
+                    LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
+                }
                 // token is not active. we do not need to worry about other details.
                 introResp.setActive(false);
                 return introResp;
@@ -508,8 +588,19 @@ public class TokenValidationHandler {
             }
 
             String tokenType = accessTokenDO.getTokenType();
-            boolean removeUsernameFromAppTokenEnabled = OAuthServerConfiguration.getInstance()
+
+            boolean removeUsernameFromAppTokenEnabledServerConfig = OAuthServerConfiguration.getInstance()
                     .isRemoveUsernameFromIntrospectionResponseForAppTokensEnabled();
+            String appResidentTenantDomain = OAuth2Util.getTenantDomain(accessTokenDO.getAppResidentTenantId());
+            if (StringUtils.isEmpty(appResidentTenantDomain)) {
+                // Get user domain as app domain.
+                appResidentTenantDomain = PrivilegedCarbonContext.getThreadLocalCarbonContext().getTenantDomain();
+            }
+            String consumerKey = accessTokenDO.getConsumerKey();
+            ServiceProvider serviceProvider = OAuth2Util.getServiceProvider(consumerKey, appResidentTenantDomain);
+            boolean removeUsernameFromAppTokenEnabled = OAuth2Util
+                    .isAppVersionAllowed(serviceProvider.getApplicationVersion(),
+                            ApplicationConstants.ApplicationVersion.APP_VERSION_V1);
             boolean isAppTokenType = StringUtils.equals(OAuthConstants.UserType.APPLICATION, tokenType);
 
             // should be in seconds
@@ -519,15 +610,21 @@ public class TokenValidationHandler {
             // token scopes
             introResp.setScope(OAuth2Util.buildScopeString((accessTokenDO.getScope())));
             // set user-name
-            if (!removeUsernameFromAppTokenEnabled || !isAppTokenType) {
+            if (!(removeUsernameFromAppTokenEnabled || removeUsernameFromAppTokenEnabledServerConfig)
+                    || !isAppTokenType) {
                 introResp.setUsername(getAuthzUser(accessTokenDO));
             }
             // add client id
             introResp.setClientId(accessTokenDO.getConsumerKey());
             // Set token binding info.
             if (accessTokenDO.getTokenBinding() != null) {
-                introResp.setBindingType(accessTokenDO.getTokenBinding().getBindingType());
+                String bindingType = accessTokenDO.getTokenBinding().getBindingType();
+                introResp.setBindingType(bindingType);
                 introResp.setBindingReference(accessTokenDO.getTokenBinding().getBindingReference());
+                if (OAuth2Constants.TokenBinderType.CERTIFICATE_BASED_TOKEN_BINDER.equals(bindingType) &&
+                        StringUtils.isNotBlank(accessTokenDO.getTokenBinding().getBindingValue())) {
+                    introResp.setCnfBindingValue(accessTokenDO.getTokenBinding().getBindingValue());
+                }
             }
             // add authorized user type
             if (tokenType != null) {
@@ -538,6 +635,10 @@ public class TokenValidationHandler {
             // Add authenticated user object since username attribute may not have the domain appended if the
             // subject identifier is built based in the SP config.
             introResp.setAuthorizedUser(accessTokenDO.getAuthzUser());
+            // Set audience if the token is not a JWT.
+            if (!OAuth2Util.isJWT(validationRequest.getAccessToken().getIdentifier())) {
+                addAudienceToIntrospectionResponse(introResp, accessTokenDO);
+            }
         }
 
         if (messageContext.getProperty(OAuth2Util.JWT_ACCESS_TOKEN) != null
@@ -565,8 +666,11 @@ public class TokenValidationHandler {
         // Validate access delegation.
         if (!tokenValidator.validateAccessDelegation(messageContext)) {
             // This is redundant. But sake of readability.
-            LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, null,
-                    OAuthConstants.LogConstants.FAILED, "Invalid access delegation.", "validate-access-token", null);
+            if (diagnosticLogBuilder != null) {
+                // diagnosticLogBuilder is not null only if diagnostic logs are enabled.
+                diagnosticLogBuilder.resultMessage("Invalid access delegation.");
+                LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
+            }
             introResp.setActive(false);
             return buildIntrospectionErrorResponse("Invalid access delegation");
         }
@@ -574,9 +678,12 @@ public class TokenValidationHandler {
         // Validate scopes at app level.
         if (!tokenValidator.validateScope(messageContext)) {
             // This is redundant. But sake of readability.
-            LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, null,
-                    OAuthConstants.LogConstants.FAILED, "Scope validation failed at application level.",
-                    "validate-access-token", null);
+
+            if (diagnosticLogBuilder != null) {
+                // diagnosticLogBuilder is not null only if diagnostic logs are enabled.
+                diagnosticLogBuilder.resultMessage("Scope validation failed at application level.");
+                LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
+            }
             introResp.setActive(false);
             if (log.isDebugEnabled()) {
                 log.debug("Scope validation has failed at app level.");
@@ -595,6 +702,17 @@ public class TokenValidationHandler {
         // All set. mark the token active.
         introResp.setActive(true);
         return introResp;
+    }
+
+    private boolean isFragmentApp(ServiceProviderProperty[] serviceProviderProperties) {
+
+        if (serviceProviderProperties == null) {
+            return false;
+        }
+
+        return Arrays.stream(serviceProviderProperties).
+                anyMatch(property -> IS_FRAGMENT_APP.equals(property.getName()) &&
+                        Boolean.parseBoolean(property.getValue()));
     }
 
     private String getAuthzUser(AccessTokenDO accessTokenDO) throws IdentityOAuth2Exception {
@@ -682,7 +800,8 @@ public class TokenValidationHandler {
         }
 
         OAuth2TokenValidator tokenValidator;
-        if (isJWTTokenValidation(accessToken.getIdentifier())) {
+        if (!StringUtils.equalsIgnoreCase(accessToken.getTokenType(), DPOP_TOKEN_TYPE) &&
+                isJWTTokenValidation(accessToken.getIdentifier())) {
             /*
             If the token is a self-contained JWT based access token and the
             config EnableJWTTokenValidationDuringIntrospection is set to true
@@ -765,7 +884,7 @@ public class TokenValidationHandler {
 
     private AccessTokenDO findRefreshToken(String refreshToken) throws IdentityOAuth2Exception {
 
-        return OAuthTokenPersistenceFactory.getInstance().getTokenManagementDAO().getRefreshToken(refreshToken);
+        return OAuth2ServiceComponentHolder.getInstance().getTokenProvider().getVerifiedRefreshToken(refreshToken);
     }
 
     private boolean isJWTTokenValidation(String tokenIdentifier) {
@@ -793,5 +912,24 @@ public class TokenValidationHandler {
         String[] validatedScopes = accessTokenDO.getScope();
         String[] scopesToReturn = (String[]) ArrayUtils.addAll(validatedScopes, requestedAllowedScopes);
         introResp.setScope(OAuth2Util.buildScopeString((scopesToReturn)));
+    }
+
+    private void addAudienceToIntrospectionResponse(OAuth2IntrospectionResponseDTO introResp,
+                                                      AccessTokenDO accessTokenDO) throws IdentityOAuth2Exception {
+
+        String tenantDomain = null;
+        try {
+            int appResidentTenantId = accessTokenDO.getAppResidentTenantId();
+            if (appResidentTenantId != MultitenantConstants.INVALID_TENANT_ID) {
+                tenantDomain = IdentityTenantUtil.getTenantDomain(appResidentTenantId);
+                OAuthAppDO oAuthAppDO = OAuth2Util.getAppInformationByClientId(accessTokenDO.getConsumerKey(),
+                        tenantDomain);
+                List<String> audience = OAuth2Util.getOIDCAudience(accessTokenDO.getConsumerKey(), oAuthAppDO);
+                introResp.setAud(String.join(",", audience));
+            }
+        } catch (InvalidOAuthClientException e) {
+            log.warn("Unable to set the audience in the introspection response. Failed to retrieve the " +
+                    "application for client id: " + accessTokenDO.getConsumerKey() + " in tenant: " + tenantDomain);
+        }
     }
 }

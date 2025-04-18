@@ -1,7 +1,7 @@
 /*
- * Copyright (c) 2017, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
+ * Copyright (c) 2017-2025, WSO2 LLC. (http://www.wso2.com).
  *
- * WSO2 Inc. licenses this file to you under the Apache License,
+ * WSO2 LLC. licenses this file to you under the Apache License,
  * Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License.
  * You may obtain a copy of the License at
@@ -20,6 +20,7 @@ package org.wso2.carbon.identity.oauth2.dcr.endpoint.util;
 
 import org.apache.commons.logging.Log;
 import org.slf4j.MDC;
+import org.wso2.carbon.context.PrivilegedCarbonContext;
 import org.wso2.carbon.identity.oauth.dcr.DCRMConstants;
 import org.wso2.carbon.identity.oauth.dcr.bean.Application;
 import org.wso2.carbon.identity.oauth.dcr.bean.ApplicationRegistrationRequest;
@@ -44,16 +45,15 @@ public class DCRMUtils {
     private static final String NOT_FOUND_STATUS = "NOT_FOUND_";
     private static final String FORBIDDEN_STATUS = "FORBIDDEN_";
 
-    private static DCRMService oAuth2DCRMService;
+    private static class OAuth2DCRMServiceHolder {
 
-    public static void setOAuth2DCRMService(DCRMService oAuth2DCRMService) {
-
-        DCRMUtils.oAuth2DCRMService = oAuth2DCRMService;
+        private static final DCRMService SERVICE = (DCRMService) PrivilegedCarbonContext
+                .getThreadLocalCarbonContext().getOSGiService(DCRMService.class, null);
     }
 
     public static DCRMService getOAuth2DCRMService() {
 
-        return oAuth2DCRMService;
+        return OAuth2DCRMServiceHolder.SERVICE;
     }
 
     public static ApplicationRegistrationRequest getApplicationRegistrationRequest(
@@ -78,6 +78,32 @@ public class DCRMUtils {
         appRegistrationRequest.setExtPkceMandatory(registrationRequestDTO.getExtPkceMandatory());
         appRegistrationRequest.setExtPkceSupportPlain(registrationRequestDTO.getExtPkceSupportPlain());
         appRegistrationRequest.setExtPublicClient(registrationRequestDTO.getExtPublicClient());
+        appRegistrationRequest.setExtTokenType(registrationRequestDTO.getExtTokenType());
+        appRegistrationRequest.setJwksURI(registrationRequestDTO.getJwksUri());
+        appRegistrationRequest.setTokenEndpointAuthMethod(registrationRequestDTO.getTokenEndpointAuthMethod());
+        appRegistrationRequest.setTokenEndpointAllowReusePvtKeyJwt(registrationRequestDTO
+                .isTokenEndpointAllowReusePvtKeyJwt());
+        appRegistrationRequest.setTokenEndpointAuthSignatureAlgorithm
+                (registrationRequestDTO.getTokenEndpointAuthSigningAlg());
+        appRegistrationRequest.setSectorIdentifierURI(registrationRequestDTO.getSectorIdentifierUri());
+        appRegistrationRequest.setIdTokenSignatureAlgorithm(registrationRequestDTO.getIdTokenSignedResponseAlg());
+        appRegistrationRequest.setIdTokenEncryptionAlgorithm(registrationRequestDTO.getIdTokenEncryptedResponseAlg());
+        appRegistrationRequest.setIdTokenEncryptionMethod(registrationRequestDTO.getIdTokenEncryptedResponseEnc());
+        appRegistrationRequest.setRequestObjectSignatureAlgorithm(registrationRequestDTO.getRequestObjectSigningAlg());
+        appRegistrationRequest.setRequestObjectEncryptionAlgorithm
+                (registrationRequestDTO.getRequestObjectEncryptionAlgorithm());
+        appRegistrationRequest.setRequestObjectEncryptionMethod
+                (registrationRequestDTO.getRequestObjectEncryptionMethod());
+        appRegistrationRequest.setTlsClientAuthSubjectDN(registrationRequestDTO.getTlsClientAuthSubjectDn());
+        appRegistrationRequest.setRequirePushedAuthorizationRequests
+                (registrationRequestDTO.isRequirePushAuthorizationRequest());
+        appRegistrationRequest.setRequireSignedRequestObject(registrationRequestDTO.isRequireSignedRequestObject());
+        appRegistrationRequest.setTlsClientCertificateBoundAccessTokens
+                (registrationRequestDTO.isTlsClientCertificateBoundAccessToken());
+        appRegistrationRequest.setSubjectType(registrationRequestDTO.getSubjectType());
+        appRegistrationRequest.setSoftwareStatement(registrationRequestDTO.getSoftwareStatement());
+        appRegistrationRequest.setAdditionalAttributes(registrationRequestDTO.getAdditionalAttributes());
+        appRegistrationRequest.setExtAllowedAudience(registrationRequestDTO.getExtAllowedAudience());
         return appRegistrationRequest;
 
     }
@@ -91,6 +117,7 @@ public class DCRMUtils {
         applicationUpdateRequest.setTokenType(updateRequestDTO.getTokenType());
         applicationUpdateRequest.setBackchannelLogoutUri(updateRequestDTO.getBackchannelLogoutUri());
         applicationUpdateRequest.setExtApplicationDisplayName(updateRequestDTO.getExtApplicationDisplayName());
+        applicationUpdateRequest.setExtApplicationVersion(updateRequestDTO.getExtApplicationVersion());
         applicationUpdateRequest.setExtApplicationOwner(updateRequestDTO.getExtApplicationOwner());
         applicationUpdateRequest.setExtApplicationTokenLifetime(updateRequestDTO.getExtApplicationTokenLifetime());
         applicationUpdateRequest.setExtUserTokenLifetime(updateRequestDTO.getExtUserTokenLifetime());
@@ -99,8 +126,32 @@ public class DCRMUtils {
         applicationUpdateRequest.setExtPkceMandatory(updateRequestDTO.getExtPkceMandatory());
         applicationUpdateRequest.setExtPkceSupportPlain(updateRequestDTO.getExtPkceSupportPlain());
         applicationUpdateRequest.setExtPublicClient(updateRequestDTO.getExtPublicClient());
+        applicationUpdateRequest.setExtTokenType(updateRequestDTO.getExtTokenType());
+        applicationUpdateRequest.setJwksURI(updateRequestDTO.getJwksUri());
+        applicationUpdateRequest.setTokenEndpointAuthMethod(updateRequestDTO.getTokenEndpointAuthMethod());
+        applicationUpdateRequest.setTokenEndpointAllowReusePvtKeyJwt(
+                updateRequestDTO.isTokenEndpointAllowReusePvtKeyJwt());
+        applicationUpdateRequest.setTokenEndpointAuthSignatureAlgorithm
+                (updateRequestDTO.getTokenEndpointAuthSigningAlg());
+        applicationUpdateRequest.setSectorIdentifierURI(updateRequestDTO.getSectorIdentifierUri());
+        applicationUpdateRequest.setIdTokenSignatureAlgorithm(updateRequestDTO.getIdTokenSignedResponseAlg());
+        applicationUpdateRequest.setIdTokenEncryptionAlgorithm(updateRequestDTO.getIdTokenEncryptedResponseAlg());
+        applicationUpdateRequest.setIdTokenEncryptionMethod(updateRequestDTO.getIdTokenEncryptedResponseEnc());
+        applicationUpdateRequest.setRequestObjectSignatureAlgorithm(
+                updateRequestDTO.getRequestObjectSigningAlg());
+        applicationUpdateRequest.setRequestObjectEncryptionAlgorithm(
+                updateRequestDTO.getRequestObjectEncryptionAlgorithm());
+        applicationUpdateRequest.setRequestObjectEncryptionMethod(updateRequestDTO.getRequestObjectEncryptionMethod());
+        applicationUpdateRequest.setTlsClientAuthSubjectDN(updateRequestDTO.getTlsClientAuthSubjectDn());
+        applicationUpdateRequest.setRequirePushedAuthorizationRequests(updateRequestDTO.isRequireSignedRequestObject());
+        applicationUpdateRequest.setRequireSignedRequestObject(updateRequestDTO.isRequireSignedRequestObject());
+        applicationUpdateRequest.setTlsClientCertificateBoundAccessTokens
+                (updateRequestDTO.isTlsClientCertificateBoundAccessToken());
+        applicationUpdateRequest.setSubjectType(updateRequestDTO.getSubjectType());
+        applicationUpdateRequest.setSoftwareStatement(updateRequestDTO.getSoftwareStatement());
+        applicationUpdateRequest.setAdditionalAttributes(updateRequestDTO.getAdditionalAttributes());
+        applicationUpdateRequest.setExtAllowedAudience(updateRequestDTO.getExtAllowedAudience());
         return applicationUpdateRequest;
-
     }
 
     public static void handleErrorResponse(DCRMException dcrmException, Log log) throws DCRMEndpointException {
@@ -119,6 +170,10 @@ public class DCRMUtils {
                 status = Response.Status.UNAUTHORIZED;
             } else if (errorCode.startsWith(FORBIDDEN_STATUS)) {
                 status = Response.Status.FORBIDDEN;
+            } else if (errorCode.startsWith(DCRMConstants.ErrorCodes.INVALID_CLIENT_METADATA) ||
+                    errorCode.startsWith(DCRMConstants.ErrorCodes.INVALID_SOFTWARE_STATEMENT)) {
+                status = Response.Status.BAD_REQUEST;
+                isStatusOnly = false;
             }
         }
         throw buildDCRMEndpointException(status, errorCode, dcrmException.getMessage(), isStatusOnly);
@@ -174,7 +229,37 @@ public class DCRMUtils {
         specification we have to set the expiration time to 0.
         https://openid.net/specs/openid-connect-registration-1_0.html */
         applicationDTO.setClientSecretExpiresAt(0L);
-
+        applicationDTO.setExtApplicationDisplayName(application.getExtApplicationDisplayName());
+        applicationDTO.setExtApplicationVersion(application.getExtApplicationVersion());
+        applicationDTO.setExtApplicationOwner(application.getExtApplicationOwner());
+        applicationDTO.setExtApplicationTokenLifetime(application.getExtApplicationTokenLifetime());
+        applicationDTO.setExtUserTokenLifetime(application.getExtUserTokenLifetime());
+        applicationDTO.setExtRefreshTokenLifetime(application.getExtRefreshTokenLifetime());
+        applicationDTO.setExtIdTokenLifetime(application.getExtIdTokenLifetime());
+        applicationDTO.setExtPkceMandatory(application.getExtPkceMandatory());
+        applicationDTO.setExtPkceSupportPlain(application.getExtPkceSupportPlain());
+        applicationDTO.setExtPublicClient(application.getExtPublicClient());
+        applicationDTO.setTokenTypeExtension(application.getExtTokenType());
+        applicationDTO.setExtTokenType(application.getExtTokenType());
+        applicationDTO.setJwksUri(application.getJwksURI());
+        applicationDTO.setTokenEndpointAuthMethod(application.getTokenEndpointAuthMethod());
+        applicationDTO.setTokenEndpointAllowReusePvtKeyJwt(application.isTokenEndpointAllowReusePvtKeyJwt());
+        applicationDTO.setTokenEndpointAuthSigningAlg(application.getTokenEndpointAuthSignatureAlgorithm());
+        applicationDTO.setSectorIdentifierUri(application.getSectorIdentifierURI());
+        applicationDTO.setIdTokenSignedResponseAlg(application.getIdTokenSignatureAlgorithm());
+        applicationDTO.setIdTokenEncryptedResponseAlg(application.getIdTokenEncryptionAlgorithm());
+        applicationDTO.setIdTokenEncryptedResponseEnc(application.getIdTokenEncryptionMethod());
+        applicationDTO.setRequireSignedRequestObject(application.isRequestObjectSignatureValidationEnabled());
+        applicationDTO.setRequestObjectSigningAlg(application.getRequestObjectSignatureAlgorithm());
+        applicationDTO.setTlsClientAuthSubjectDn(application.getTlsClientAuthSubjectDN());
+        applicationDTO.setSubjectType(application.getSubjectType());
+        applicationDTO.setRequestObjectEncryptionAlgorithm(application.getRequestObjectEncryptionAlgorithm());
+        applicationDTO.setRequestObjectEncryptionMethod(application.getRequestObjectEncryptionMethod());
+        applicationDTO.setRequirePushAuthorizationRequest(application.isRequirePushedAuthorizationRequests());
+        applicationDTO.setTlsClientCertificateBoundAccessToken(application.isTlsClientCertificateBoundAccessTokens());
+        applicationDTO.setSoftwareStatement(application.getSoftwareStatement());
+        applicationDTO.setAdditionalAttributes(application.getAdditionalAttributes());
+        applicationDTO.setExtAllowedAudience(application.getExtAllowedAudience());
         return applicationDTO;
     }
 
@@ -208,8 +293,11 @@ public class DCRMUtils {
             return new DCRMEndpointException(status);
         } else {
             String error = DCRMConstants.ErrorCodes.INVALID_CLIENT_METADATA;
-            if (code.equals(DCRMConstants.ErrorMessages.BAD_REQUEST_INVALID_REDIRECT_URI.toString())) {
+            if (DCRMConstants.ErrorMessages.BAD_REQUEST_INVALID_REDIRECT_URI.toString().equals(code)) {
                 error = DCRMConstants.ErrorCodes.INVALID_REDIRECT_URI;
+            }
+            if (code.equals(DCRMConstants.ErrorCodes.INVALID_SOFTWARE_STATEMENT)) {
+                error = DCRMConstants.ErrorCodes.INVALID_SOFTWARE_STATEMENT;
             }
 
             ErrorDTO errorDTO = new ErrorDTO();
@@ -219,5 +307,4 @@ public class DCRMUtils {
             return new DCRMEndpointException(status, errorDTO);
         }
     }
-
 }

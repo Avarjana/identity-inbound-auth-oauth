@@ -18,6 +18,8 @@
 
 package org.wso2.carbon.identity.oauth.cache;
 
+import com.nimbusds.jwt.JWT;
+import com.nimbusds.jwt.JWTParser;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.logging.Log;
@@ -29,8 +31,10 @@ import org.wso2.carbon.identity.core.util.IdentityUtil;
 import org.wso2.carbon.identity.oauth.config.OAuthServerConfiguration;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
 import org.wso2.carbon.identity.oauth2.dao.OAuthTokenPersistenceFactory;
+import org.wso2.carbon.identity.oauth2.util.OAuth2Util;
 import org.wso2.carbon.utils.CarbonUtils;
 
+import java.text.ParseException;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -100,6 +104,9 @@ public class AuthorizationGrantCache extends
                 log.debug("Getting cache entry from session store using tokenId: " + tokenId);
             }
             cacheEntry = getFromSessionStore(tokenId);
+            if (cacheEntry != null) {
+                super.addToCache(key, cacheEntry);
+            }
         }
         return cacheEntry;
     }
@@ -122,6 +129,9 @@ public class AuthorizationGrantCache extends
                 }
             }
             cacheEntry = getFromSessionStore(replaceFromTokenId(key.getUserAttributesId()));
+            if (cacheEntry != null) {
+                super.addToCache(key, cacheEntry);
+            }
         }
         return cacheEntry;
     }
@@ -178,6 +188,9 @@ public class AuthorizationGrantCache extends
                 }
             }
             cacheEntry = getFromSessionStore(replaceFromCodeId(key.getUserAttributesId()));
+            if (cacheEntry != null) {
+                super.addToCache(key, cacheEntry);
+            }
         }
         return cacheEntry;
     }
@@ -235,6 +248,20 @@ public class AuthorizationGrantCache extends
      * @return TOKEN_ID from the database
      */
     private String replaceFromTokenId(String keyValue) {
+        if (OAuth2Util.isJWT(keyValue)) {
+            try {
+                JWT parsedJwtToken = JWTParser.parse(keyValue);
+                keyValue = parsedJwtToken.getJWTClaimsSet().getJWTID();
+            } catch (ParseException e) {
+                if (log.isDebugEnabled()) {
+                    if (IdentityUtil.isTokenLoggable(IdentityConstants.IdentityTokens.ACCESS_TOKEN)) {
+                        log.debug("Error while getting JWTID from token: " + keyValue, e);
+                    } else {
+                        log.debug("Error while getting JWTID from token");
+                    }
+                }
+            }
+        }
         try {
             return OAuthTokenPersistenceFactory.getInstance().getAccessTokenDAO().getTokenIdByAccessToken(keyValue);
         } catch (IdentityOAuth2Exception e) {

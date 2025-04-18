@@ -17,18 +17,21 @@
  */
 package org.wso2.carbon.identity.oauth.endpoint.introspection;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.mockito.Mock;
-import org.powermock.api.mockito.PowerMockito;
-import org.powermock.core.classloader.annotations.PrepareForTest;
+import org.mockito.MockedStatic;
+import org.mockito.testng.MockitoTestNGListener;
+import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeClass;
+import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.DataProvider;
+import org.testng.annotations.Listeners;
 import org.testng.annotations.Test;
 import org.wso2.carbon.base.CarbonBaseConstants;
 import org.wso2.carbon.identity.oauth.common.OAuthConstants;
 import org.wso2.carbon.identity.oauth.config.OAuthServerConfiguration;
-import org.wso2.carbon.identity.testutil.powermock.PowerMockIdentityBaseTest;
 
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -36,6 +39,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertTrue;
@@ -43,16 +48,18 @@ import static org.testng.Assert.assertTrue;
 /**
  * This class does unit test coverage for RecoveryConfigImpl class
  */
-@PrepareForTest({OAuthServerConfiguration.class})
-public class IntrospectionResponseBuilderTest extends PowerMockIdentityBaseTest {
+@Listeners(MockitoTestNGListener.class)
+public class IntrospectionResponseBuilderTest {
 
     private IntrospectionResponseBuilder introspectionResponseBuilder1;
 
     private IntrospectionResponseBuilder introspectionResponseBuilder2;
 
     @Mock
-    OAuthServerConfiguration oAuthServerConfiguration;
+    OAuthServerConfiguration mockOAuthServerConfiguration;
+
     List<String> filteredIntrospectionClaims = new ArrayList<>();
+    private MockedStatic<OAuthServerConfiguration> oAuthServerConfiguration;
 
     @BeforeClass
     public void setUp() {
@@ -64,6 +71,23 @@ public class IntrospectionResponseBuilderTest extends PowerMockIdentityBaseTest 
                 CarbonBaseConstants.CARBON_HOME,
                 Paths.get(System.getProperty("user.dir"), "src", "test", "resources").toString()
         );
+    }
+
+    @BeforeMethod
+    public void setUpMethod() {
+
+        oAuthServerConfiguration = mockStatic(OAuthServerConfiguration.class);
+        oAuthServerConfiguration.when(OAuthServerConfiguration::getInstance)
+                .thenReturn(this.mockOAuthServerConfiguration);
+        when(mockOAuthServerConfiguration.getFilteredIntrospectionClaims())
+                .thenReturn(filteredIntrospectionClaims);
+    }
+
+    @AfterMethod
+    public void tearDownMethod() {
+
+        filteredIntrospectionClaims.clear();
+        oAuthServerConfiguration.close();
     }
 
     @DataProvider(name = "provideBuilderData")
@@ -83,7 +107,8 @@ public class IntrospectionResponseBuilderTest extends PowerMockIdentityBaseTest 
      * This method does unit test for build response with values
      */
     @Test(dataProvider = "provideBuilderData")
-    public void testResposeBuilderWithVal(boolean isActive, int notBefore, int expiration, boolean timesSetInJson) {
+    public void testResposeBuilderWithVal(boolean isActive, int notBefore, int expiration, boolean timesSetInJson)
+            throws Exception {
 
         String idToken = "eyJhbGciOiJSUzI1NiJ9.eyJhdXRoX3RpbWUiOjE0NTIxNzAxNzYsImV4cCI6MTQ1MjE3Mzc3Niwic3ViI" +
                 "joidXNlQGNhcmJvbi5zdXBlciIsImF6cCI6IjF5TDFfZnpuekdZdXRYNWdCMDNMNnRYR3lqZ2EiLCJhdF9oYXNoI" +
@@ -91,8 +116,6 @@ public class IntrospectionResponseBuilderTest extends PowerMockIdentityBaseTest 
                 "ImlzcyI6Imh0dHBzOlwvXC9sb2NhbGhvc3Q6OTQ0M1wvb2F1dGgyXC90b2tlbiIsImlhdCI6MTQ1MjE3MDE3Nn0.RqAgm0ybe7tQ" +
                 "YvQYi7uqEtzWf6wgDv5sJq2UIQRC4OJGjn_fTqftIWerZc7rIMRYXi7jzuHxX_GabUhuj7m1iRzi1wgxbI9yQn825lDVF4Lt9" +
                 "DMUTBfKLk81KIy6uB_ECtyxumoX3372yRgC7R56_L_hAElflgBsclEUwEH9psE";
-
-        mockOAuthServerConfiguration(filteredIntrospectionClaims);
 
         introspectionResponseBuilder1.setActive(isActive);
         introspectionResponseBuilder1.setIssuedAt(1452170176);
@@ -109,6 +132,7 @@ public class IntrospectionResponseBuilderTest extends PowerMockIdentityBaseTest 
         introspectionResponseBuilder1.setErrorCode("Invalid input");
         introspectionResponseBuilder1.setErrorDescription("error_discription");
         introspectionResponseBuilder1.setAuthorizedUserType(OAuthConstants.UserType.APPLICATION_USER);
+        introspectionResponseBuilder1.setCnfBindingValue("R4Hj_0nNdIzVvPdCdsWlxNKm6a74cszp4Za4M1iE8P9");
 
         JSONObject jsonObject = new JSONObject(introspectionResponseBuilder1.build());
 
@@ -136,6 +160,10 @@ public class IntrospectionResponseBuilderTest extends PowerMockIdentityBaseTest 
                 "ERROR_DESCRIPTION messages are not equal");
         assertEquals(jsonObject.get(IntrospectionResponse.AUT), "APPLICATION_USER",
                 "AUT values are not equal");
+        Map<String, Object> cnf = new ObjectMapper()
+                .readValue(jsonObject.get(IntrospectionResponse.CNF).toString(), HashMap.class);
+        assertEquals(cnf.get(OAuthConstants.X5T_S256), "R4Hj_0nNdIzVvPdCdsWlxNKm6a74cszp4Za4M1iE8P9",
+                "CNF value is not equal");
     }
 
     /**
@@ -143,8 +171,6 @@ public class IntrospectionResponseBuilderTest extends PowerMockIdentityBaseTest 
      */
     @Test
     public void testResposeBuilderWithoutVal() {
-
-        mockOAuthServerConfiguration(filteredIntrospectionClaims);
 
         introspectionResponseBuilder2.setActive(false);
         introspectionResponseBuilder2.setIssuedAt(0);
@@ -161,6 +187,7 @@ public class IntrospectionResponseBuilderTest extends PowerMockIdentityBaseTest 
         introspectionResponseBuilder2.setErrorCode("");
         introspectionResponseBuilder2.setErrorDescription("");
         introspectionResponseBuilder2.setAuthorizedUserType("");
+        introspectionResponseBuilder2.setCnfBindingValue("");
 
         JSONObject jsonObject2 = new JSONObject(introspectionResponseBuilder2.build());
         assertFalse(jsonObject2.has(IntrospectionResponse.EXP), "EXP already exists in the response builder");
@@ -168,7 +195,8 @@ public class IntrospectionResponseBuilderTest extends PowerMockIdentityBaseTest 
         assertFalse(jsonObject2.has(IntrospectionResponse.IAT), "IAT already exists in the response builder");
         assertFalse(jsonObject2.has(IntrospectionResponse.JTI), "JTI already exists in the response builder");
         assertFalse(jsonObject2.has(IntrospectionResponse.SUB), "sub already exists in the response builder");
-        assertFalse(jsonObject2.has(IntrospectionResponse.USERNAME), "USERNAME already exists in the response builder");
+        assertFalse(jsonObject2.has(IntrospectionResponse.USERNAME), "USERNAME already exists in the " +
+                "response builder");
         assertFalse(jsonObject2.has(IntrospectionResponse.TOKEN_TYPE),
                 "TOKEN_TYPE already exists in the response builder");
         assertFalse(jsonObject2.has(IntrospectionResponse.AUD), "AUD already exists in the response builder");
@@ -176,10 +204,12 @@ public class IntrospectionResponseBuilderTest extends PowerMockIdentityBaseTest 
         assertFalse(jsonObject2.has(IntrospectionResponse.SCOPE), "SCOPE already exists in the response builder");
         assertFalse(jsonObject2.has(IntrospectionResponse.CLIENT_ID),
                 "CLIENT_ID already exists in the response builder");
-        assertFalse(jsonObject2.has(IntrospectionResponse.Error.ERROR), "ERROR already exists in the response builder");
+        assertFalse(jsonObject2.has(IntrospectionResponse.Error.ERROR), "ERROR already exists in the " +
+                "response builder");
         assertFalse(jsonObject2.has(IntrospectionResponse.Error.ERROR_DESCRIPTION),
                 "ERROR_DESCRIPTION already exists in the response builder");
         assertFalse(jsonObject2.has(IntrospectionResponse.AUT), "AUT already exists in the response builder");
+        assertFalse(jsonObject2.has(IntrospectionResponse.CNF), "CNF value exists in the response builder");
     }
 
     @Test(dependsOnMethods = "testResposeBuilderWithVal")
@@ -187,8 +217,6 @@ public class IntrospectionResponseBuilderTest extends PowerMockIdentityBaseTest 
 
         Map<String, Object> additionalData = new HashMap<>();
         List<Map<String, Object>> permissions = new ArrayList<>();
-
-        mockOAuthServerConfiguration(filteredIntrospectionClaims);
 
         Map<String, Object> resource1 = new HashMap<>();
         String resourceIdKey = "resource_id";
@@ -254,9 +282,7 @@ public class IntrospectionResponseBuilderTest extends PowerMockIdentityBaseTest 
         introspectionResponseBuilder1.setErrorCode("Invalid input");
         introspectionResponseBuilder1.setErrorDescription("error_discription");
 
-        List<String> filteredIntrospectionClaims = new ArrayList<>();
         filteredIntrospectionClaims.add(IntrospectionResponse.USERNAME);
-        mockOAuthServerConfiguration(filteredIntrospectionClaims);
 
         JSONObject jsonObject = new JSONObject(introspectionResponseBuilder1.build());
         assertFalse(jsonObject.has(IntrospectionResponse.USERNAME));
@@ -275,10 +301,8 @@ public class IntrospectionResponseBuilderTest extends PowerMockIdentityBaseTest 
                 "YvQYi7uqEtzWf6wgDv5sJq2UIQRC4OJGjn_fTqftIWerZc7rIMRYXi7jzuHxX_GabUhuj7m1iRzi1wgxbI9yQn825lDVF4Lt9" +
                 "DMUTBfKLk81KIy6uB_ECtyxumoX3372yRgC7R56_L_hAElflgBsclEUwEH9psE";
 
-        List<String> filteredIntrospectionClaims = new ArrayList<>();
         filteredIntrospectionClaims.add(IntrospectionResponse.SCOPE);
         filteredIntrospectionClaims.add(IntrospectionResponse.NBF);
-        mockOAuthServerConfiguration(filteredIntrospectionClaims);
 
         introspectionResponseBuilder1.setActive(true);
         introspectionResponseBuilder1.setIssuedAt(1452170176);
@@ -299,13 +323,5 @@ public class IntrospectionResponseBuilderTest extends PowerMockIdentityBaseTest 
         assertTrue(jsonObject.has(IntrospectionResponse.AUD));
         assertFalse(jsonObject.has(IntrospectionResponse.SCOPE));
         assertFalse(jsonObject.has(IntrospectionResponse.NBF));
-    }
-
-    private void mockOAuthServerConfiguration(List<String> filteredIntrospectionClaims) {
-
-        PowerMockito.mockStatic(OAuthServerConfiguration.class);
-        PowerMockito.when(OAuthServerConfiguration.getInstance()).thenReturn(oAuthServerConfiguration);
-        PowerMockito.when(oAuthServerConfiguration.getFilteredIntrospectionClaims())
-                .thenReturn(filteredIntrospectionClaims);
     }
 }

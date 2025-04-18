@@ -18,18 +18,24 @@
 
 package org.wso2.carbon.identity.oauth2.authz.handlers;
 
-import org.powermock.modules.testng.PowerMockTestCase;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 import org.testng.Assert;
-import org.testng.annotations.AfterMethod;
+import org.testng.annotations.AfterClass;
+import org.testng.annotations.BeforeClass;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
+import org.wso2.carbon.identity.central.log.mgt.internal.CentralLogMgtServiceComponentHolder;
 import org.wso2.carbon.identity.common.testng.WithCarbonHome;
 import org.wso2.carbon.identity.common.testng.WithH2Database;
 import org.wso2.carbon.identity.common.testng.WithRealmService;
+import org.wso2.carbon.identity.event.services.IdentityEventService;
+import org.wso2.carbon.identity.oauth.IdentityOAuthAdminException;
 import org.wso2.carbon.identity.oauth.cache.AppInfoCache;
 import org.wso2.carbon.identity.oauth.common.OAuthConstants;
+import org.wso2.carbon.identity.oauth.dao.OAuthAppDAO;
 import org.wso2.carbon.identity.oauth.dao.OAuthAppDO;
 import org.wso2.carbon.identity.oauth.internal.OAuthComponentServiceHolder;
 import org.wso2.carbon.identity.oauth2.TestConstants;
@@ -37,24 +43,50 @@ import org.wso2.carbon.identity.oauth2.authz.OAuthAuthzReqMessageContext;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2AuthorizeReqDTO;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2AuthorizeRespDTO;
 import org.wso2.carbon.identity.oauth2.internal.OAuth2ServiceComponentHolder;
+import org.wso2.carbon.identity.oauth2.util.AuthzUtil;
+
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.wso2.carbon.identity.application.mgt.ApplicationConstants.DEFAULT_BACKCHANNEL_LOGOUT_URL;
 
 /**
  * Test class covering CodeResponseTypeHandler
  */
 
 @WithCarbonHome
-@WithH2Database(files = {"dbScripts/h2.sql", "dbScripts/identity.sql"})
+@WithH2Database(files = {"dbScripts/identity.sql", "dbScripts/insert_consumer_app.sql",
+        "dbScripts/insert_local_idp.sql"})
 @WithRealmService(tenantId = TestConstants.TENANT_ID,
         tenantDomain = TestConstants.TENANT_DOMAIN,
         initUserStoreManager = true,
         injectToSingletons = {OAuthComponentServiceHolder.class})
-public class CodeResponseTypeHandlerTest extends PowerMockTestCase {
+public class CodeResponseTypeHandlerTest {
 
     private static final String TEST_CONSUMER_KEY =  "testconsumenrkey";
     private static final String TEST_CALLBACK_URL = "https://localhost:8000/callback";
 
     OAuthAuthzReqMessageContext authAuthzReqMessageContext;
     OAuth2AuthorizeReqDTO authorizationReqDTO;
+    private MockedStatic<AuthzUtil> mockedAuthzUtil;
+
+    @BeforeClass
+    public void init() throws IdentityOAuthAdminException {
+
+        IdentityEventService identityEventService = mock(IdentityEventService.class);
+        CentralLogMgtServiceComponentHolder.getInstance().setIdentityEventService(identityEventService);
+        new OAuthAppDAO().addOAuthApplication(getDefaultOAuthAppDO());
+        Mockito.clearAllCaches();
+        mockedAuthzUtil = mockStatic(AuthzUtil.class);
+        mockedAuthzUtil.when(AuthzUtil::isLegacyAuthzRuntime).thenReturn(false);
+    }
+
+    @AfterClass
+    public void clear() throws IdentityOAuthAdminException {
+
+        CentralLogMgtServiceComponentHolder.getInstance().setIdentityEventService(null);
+        new OAuthAppDAO().removeConsumerApplication(TEST_CONSUMER_KEY);
+        mockedAuthzUtil.close();
+    }
 
     @BeforeMethod
     public void setUp() throws Exception {
@@ -65,16 +97,13 @@ public class CodeResponseTypeHandlerTest extends PowerMockTestCase {
         authenticatedUser.setUserName("testUser");
         authenticatedUser.setTenantDomain("carbon.super");
         authenticatedUser.setUserStoreDomain("PRIMARY");
+        authenticatedUser.setUserId("1234");
         authorizationReqDTO.setUser(authenticatedUser);
         authorizationReqDTO.setResponseType(OAuthConstants.GrantTypes.TOKEN);
         authAuthzReqMessageContext
                 = new OAuthAuthzReqMessageContext(authorizationReqDTO);
         authAuthzReqMessageContext
                 .setApprovedScope(new String[]{"scope1", "scope2", OAuthConstants.Scope.OPENID});
-    }
-
-    @AfterMethod
-    public void tearDown() throws Exception {
     }
 
     /**
@@ -116,5 +145,26 @@ public class CodeResponseTypeHandlerTest extends PowerMockTestCase {
                 "Access token not Authorization code");
         Assert.assertEquals(oAuth2AuthorizeRespDTO.getCallbackURI()
                 , TEST_CALLBACK_URL, "Callback url not set");
+    }
+
+    private OAuthAppDO getDefaultOAuthAppDO() {
+        AuthenticatedUser authenticatedUser = new AuthenticatedUser();
+        authenticatedUser.setUserName("user1");
+        authenticatedUser.setTenantDomain("carbon.super");
+        authenticatedUser.setUserStoreDomain("USER_STORE_DOMAIN_NAME");
+
+        OAuthAppDO appDO = new OAuthAppDO();
+        appDO.setApplicationName("CodeResponseTypeHandlerTestApp");
+        appDO.setOauthConsumerKey(TEST_CONSUMER_KEY);
+        appDO.setOauthConsumerSecret("87n9a540f544777860e44e75f605d435");
+        appDO.setUser(authenticatedUser);
+        appDO.setCallbackUrl(TEST_CALLBACK_URL);
+        appDO.setOauthVersion(OAuthConstants.OAuthVersions.VERSION_2);
+        appDO.setApplicationAccessTokenExpiryTime(3600);
+        appDO.setUserAccessTokenExpiryTime(3600);
+        appDO.setRefreshTokenExpiryTime(84100);
+        appDO.setIdTokenExpiryTime(3600);
+        appDO.setBackChannelLogoutUrl(DEFAULT_BACKCHANNEL_LOGOUT_URL);
+        return appDO;
     }
 }

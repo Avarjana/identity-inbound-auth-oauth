@@ -18,14 +18,17 @@
 package org.wso2.carbon.identity.oauth.endpoint.user.impl;
 
 import org.apache.commons.lang.ArrayUtils;
+import org.apache.commons.lang.StringUtils;
 import org.apache.oltu.oauth2.common.error.OAuthError;
 import org.wso2.carbon.identity.oauth.common.exception.InvalidOAuthClientException;
-import org.wso2.carbon.identity.oauth.endpoint.util.EndpointUtil;
+import org.wso2.carbon.identity.oauth.dao.OAuthAppDO;
+import org.wso2.carbon.identity.oauth.endpoint.util.factory.OAuth2TokenValidatorServiceFactory;
 import org.wso2.carbon.identity.oauth.user.UserInfoAccessTokenValidator;
 import org.wso2.carbon.identity.oauth.user.UserInfoEndpointException;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2TokenValidationRequestDTO;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2TokenValidationResponseDTO;
+import org.wso2.carbon.identity.oauth2.internal.OAuth2ServiceComponentHolder;
 import org.wso2.carbon.identity.oauth2.model.AccessTokenDO;
 import org.wso2.carbon.identity.oauth2.util.OAuth2Util;
 
@@ -60,7 +63,8 @@ public class UserInfoISAccessTokenValidator implements UserInfoAccessTokenValida
         accessToken.setTokenType("bearer");
         accessToken.setIdentifier(accessTokenIdentifier);
         dto.setAccessToken(accessToken);
-        OAuth2TokenValidationResponseDTO response = EndpointUtil.getOAuth2TokenValidationService().validate(dto);
+        OAuth2TokenValidationResponseDTO response = OAuth2TokenValidatorServiceFactory
+                .getOAuth2TokenValidatorService().validate(dto);
         AccessTokenDO accessTokenDO;
 
         // invalid access token
@@ -77,7 +81,8 @@ public class UserInfoISAccessTokenValidator implements UserInfoAccessTokenValida
         }
 
         try {
-            accessTokenDO = OAuth2Util.findAccessToken(accessTokenIdentifier, false);
+            accessTokenDO = OAuth2ServiceComponentHolder.getInstance().getTokenProvider()
+                    .getVerifiedAccessToken(accessTokenIdentifier, false);
         } catch (IdentityOAuth2Exception e) {
             throw new UserInfoEndpointException("Error in getting AccessTokenDO", e);
         }
@@ -93,9 +98,16 @@ public class UserInfoISAccessTokenValidator implements UserInfoAccessTokenValida
         }
 
         try {
-            if (accessTokenDO != null && request != null &&
-                    OAuth2Util.getAppInformationByClientId(accessTokenDO.getConsumerKey()).
-                    isTokenBindingValidationEnabled() && !isValidTokenBinding(response.getTokenBinding(), request)) {
+            OAuthAppDO appDO;
+            String appResidentTenantDomain = OAuth2Util.getAppResidentTenantDomain();
+            if (StringUtils.isNotEmpty(appResidentTenantDomain)) {
+                appDO = OAuth2Util.getAppInformationByClientId(accessTokenDO.getConsumerKey(),
+                        appResidentTenantDomain);
+            } else {
+                appDO = OAuth2Util.getAppInformationByClientId(accessTokenDO.getConsumerKey());
+            }
+            if (accessTokenDO != null && request != null && appDO.isTokenBindingValidationEnabled() &&
+                    !isValidTokenBinding(response.getTokenBinding(), request)) {
                     throw new UserInfoEndpointException(OAuthError.ResourceResponse.INVALID_REQUEST,
                             "Valid token binding value not present in the request.");
             }

@@ -16,41 +16,56 @@
 package org.wso2.carbon.identity.oauth2.authz;
 
 import org.apache.oltu.oauth2.common.error.OAuthError;
+import org.mockito.MockedStatic;
 import org.testng.Assert;
+import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeClass;
+import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
 import org.wso2.carbon.identity.application.common.model.ServiceProvider;
 import org.wso2.carbon.identity.application.mgt.ApplicationManagementService;
+import org.wso2.carbon.identity.central.log.mgt.internal.CentralLogMgtServiceComponentHolder;
 import org.wso2.carbon.identity.common.testng.WithCarbonHome;
 import org.wso2.carbon.identity.common.testng.WithH2Database;
 import org.wso2.carbon.identity.common.testng.WithRealmService;
+import org.wso2.carbon.identity.core.internal.IdentityCoreServiceDataHolder;
+import org.wso2.carbon.identity.event.services.IdentityEventService;
 import org.wso2.carbon.identity.oauth.internal.OAuthComponentServiceHolder;
 import org.wso2.carbon.identity.oauth2.TestConstants;
+import org.wso2.carbon.identity.oauth2.TestUtil;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2AuthorizeReqDTO;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2AuthorizeRespDTO;
 import org.wso2.carbon.identity.oauth2.internal.OAuth2ServiceComponentHolder;
+import org.wso2.carbon.identity.oauth2.util.AuthzUtil;
 import org.wso2.carbon.identity.testutil.IdentityBaseTest;
+import org.wso2.carbon.user.api.UserStoreException;
 
-import static org.mockito.Matchers.anyString;
-import static org.powermock.api.mockito.PowerMockito.mock;
-import static org.powermock.api.mockito.PowerMockito.when;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 
 @WithCarbonHome
-@WithH2Database(files = {"dbScripts/h2_with_application_and_token.sql"})
+@WithH2Database(files = {"dbScripts/identity.sql", "dbScripts/insert_application_and_token.sql",
+        "dbScripts/insert_local_idp.sql"})
 @WithRealmService(tenantId = TestConstants.TENANT_ID, tenantDomain = TestConstants.TENANT_DOMAIN,
-        initUserStoreManager = true, injectToSingletons = {OAuthComponentServiceHolder.class})
+        initUserStoreManager = true, injectToSingletons = {OAuthComponentServiceHolder.class,
+        IdentityCoreServiceDataHolder.class})
 public class AuthorizationHandlerManagerTest extends IdentityBaseTest {
 
     private ApplicationManagementService applicationManagementService;
     private AuthorizationHandlerManager authorizationHandlerManager;
     private OAuth2AuthorizeReqDTO authzReqDTO = new OAuth2AuthorizeReqDTO();
     private ServiceProvider serviceProvider;
+    private MockedStatic<AuthzUtil> mockedAuthzUtil;
 
     @BeforeClass
     public void setUp() throws Exception {
 
+        IdentityEventService identityEventService = mock(IdentityEventService.class);
+        CentralLogMgtServiceComponentHolder.getInstance().setIdentityEventService(identityEventService);
         applicationManagementService = mock(ApplicationManagementService.class);
         OAuth2ServiceComponentHolder.setApplicationMgtService(applicationManagementService);
         serviceProvider = mock(ServiceProvider.class);
@@ -59,6 +74,22 @@ public class AuthorizationHandlerManagerTest extends IdentityBaseTest {
         when(applicationManagementService.getServiceProviderByClientId(anyString(), anyString(), anyString()))
                 .thenReturn(serviceProvider);
         authorizationHandlerManager = AuthorizationHandlerManager.getInstance();
+        mockedAuthzUtil = mockStatic(AuthzUtil.class);
+        mockedAuthzUtil.when(AuthzUtil::isLegacyAuthzRuntime).thenReturn(false);
+    }
+
+    @AfterClass
+    public void tearDown() {
+
+        CentralLogMgtServiceComponentHolder.getInstance().setIdentityEventService(null);
+        mockedAuthzUtil.close();
+
+    }
+
+    @BeforeMethod
+    public void setUpMethod() throws UserStoreException {
+
+        TestUtil.mockRealmInIdentityTenantUtil(TestConstants.TENANT_ID, TestConstants.TENANT_DOMAIN);
     }
 
     /**

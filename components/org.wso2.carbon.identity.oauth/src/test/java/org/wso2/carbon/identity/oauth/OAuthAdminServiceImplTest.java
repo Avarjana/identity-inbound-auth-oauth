@@ -1,7 +1,7 @@
 /*
- * Copyright (c) 2017, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
+ * Copyright (c) 2017-2025, WSO2 LLC. (https://www.wso2.com).
  *
- * WSO2 Inc. licenses this file to you under the Apache License,
+ * WSO2 LLC. licenses this file to you under the Apache License,
  * Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License.
  * You may obtain a copy of the License at
@@ -11,52 +11,67 @@
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
+ * KIND, either express or implied.  See the License for the
  * specific language governing permissions and limitations
  * under the License.
  */
 
 package org.wso2.carbon.identity.oauth;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.apache.axis2.context.ConfigurationContext;
 import org.apache.axis2.engine.AxisConfiguration;
 import org.apache.commons.lang.StringUtils;
-import org.mockito.Matchers;
 import org.mockito.Mock;
+import org.mockito.MockedConstruction;
+import org.mockito.MockedStatic;
 import org.mockito.Mockito;
-import org.mockito.MockitoAnnotations;
-import org.mockito.internal.util.reflection.FieldSetter;
-import org.powermock.api.mockito.PowerMockito;
-import org.powermock.core.classloader.annotations.PowerMockIgnore;
-import org.powermock.core.classloader.annotations.PrepareForTest;
 import org.testng.Assert;
+import org.testng.annotations.AfterClass;
+import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 import org.wso2.carbon.context.PrivilegedCarbonContext;
+import org.wso2.carbon.core.util.CryptoException;
+import org.wso2.carbon.core.util.CryptoUtil;
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
+import org.wso2.carbon.identity.application.common.model.ServiceProvider;
 import org.wso2.carbon.identity.application.mgt.ApplicationManagementService;
+import org.wso2.carbon.identity.claim.metadata.mgt.ClaimMetadataManagementService;
+import org.wso2.carbon.identity.claim.metadata.mgt.exception.ClaimMetadataException;
+import org.wso2.carbon.identity.claim.metadata.mgt.model.ExternalClaim;
 import org.wso2.carbon.identity.core.internal.IdentityCoreServiceComponent;
 import org.wso2.carbon.identity.core.util.IdentityTenantUtil;
 import org.wso2.carbon.identity.core.util.IdentityUtil;
 import org.wso2.carbon.identity.oauth.common.OAuth2ErrorCodes;
 import org.wso2.carbon.identity.oauth.common.OAuthConstants;
 import org.wso2.carbon.identity.oauth.common.exception.InvalidOAuthClientException;
+import org.wso2.carbon.identity.oauth.config.OAuthServerConfiguration;
 import org.wso2.carbon.identity.oauth.dao.OAuthAppDAO;
 import org.wso2.carbon.identity.oauth.dao.OAuthAppDO;
 import org.wso2.carbon.identity.oauth.dto.OAuthAppRevocationRequestDTO;
 import org.wso2.carbon.identity.oauth.dto.OAuthConsumerAppDTO;
 import org.wso2.carbon.identity.oauth.dto.OAuthRevocationResponseDTO;
+import org.wso2.carbon.identity.oauth.dto.ScopeDTO;
 import org.wso2.carbon.identity.oauth.internal.OAuthComponentServiceHolder;
+import org.wso2.carbon.identity.oauth.tokenprocessor.EncryptionDecryptionPersistenceProcessor;
+import org.wso2.carbon.identity.oauth.tokenprocessor.HashingPersistenceProcessor;
+import org.wso2.carbon.identity.oauth.tokenprocessor.PlainTextPersistenceProcessor;
+import org.wso2.carbon.identity.oauth.tokenprocessor.TokenPersistenceProcessor;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
 import org.wso2.carbon.identity.oauth2.TestConstants;
 import org.wso2.carbon.identity.oauth2.dao.AccessTokenDAO;
+import org.wso2.carbon.identity.oauth2.dao.AccessTokenDAOImpl;
+import org.wso2.carbon.identity.oauth2.dao.AuthorizationCodeDAO;
 import org.wso2.carbon.identity.oauth2.dao.OAuthTokenPersistenceFactory;
+import org.wso2.carbon.identity.oauth2.dao.TokenManagementDAO;
 import org.wso2.carbon.identity.oauth2.dao.TokenManagementDAOImpl;
 import org.wso2.carbon.identity.oauth2.internal.OAuth2ServiceComponentHolder;
 import org.wso2.carbon.identity.oauth2.model.AccessTokenDO;
 import org.wso2.carbon.identity.oauth2.util.OAuth2Util;
-import org.wso2.carbon.identity.testutil.powermock.PowerMockIdentityBaseTest;
+import org.wso2.carbon.identity.openidconnect.dao.ScopeClaimMappingDAO;
 import org.wso2.carbon.user.api.RealmConfiguration;
 import org.wso2.carbon.user.api.Tenant;
 import org.wso2.carbon.user.api.UserRealm;
@@ -71,6 +86,10 @@ import org.wso2.carbon.utils.multitenancy.MultitenantConstants;
 import org.wso2.carbon.utils.multitenancy.MultitenantUtils;
 
 import java.io.File;
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -79,29 +98,35 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
 
-import static org.mockito.Matchers.any;
-import static org.mockito.Matchers.anyInt;
-import static org.mockito.Matchers.anyObject;
-import static org.mockito.Matchers.anyString;
-import static org.powermock.api.mockito.PowerMockito.doNothing;
-import static org.powermock.api.mockito.PowerMockito.doThrow;
-import static org.powermock.api.mockito.PowerMockito.mock;
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
-import static org.powermock.api.mockito.PowerMockito.spy;
-import static org.powermock.api.mockito.PowerMockito.when;
-import static org.powermock.api.mockito.PowerMockito.whenNew;
-import static org.powermock.reflect.Whitebox.invokeMethod;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.mockito.MockitoAnnotations.initMocks;
+import static org.testng.Assert.assertThrows;
+import static org.wso2.carbon.base.MultitenantConstants.SUPER_TENANT_ID;
+import static org.wso2.carbon.identity.application.mgt.ApplicationConstants.DEFAULT_BACKCHANNEL_LOGOUT_URL;
+import static org.wso2.carbon.identity.oauth.common.OAuthConstants.ENABLE_CLAIMS_SEPARATION_FOR_ACCESS_TOKEN;
+import static org.wso2.carbon.identity.oauth.common.OAuthConstants.OIDC_DIALECT;
+import static org.wso2.carbon.utils.multitenancy.MultitenantConstants.SUPER_TENANT_DOMAIN_NAME;
 
-@PowerMockIgnore({"javax.net.*", "javax.security.*", "javax.crypto.*"})
-@PrepareForTest({OAuthAdminServiceImpl.class, IdentityCoreServiceComponent.class, ConfigurationContextService.class,
-        OAuthUtil.class, OAuthAppDAO.class, OAuth2Util.class, OAuthComponentServiceHolder.class,
-        IdentityUtil.class})
-public class OAuthAdminServiceImplTest extends PowerMockIdentityBaseTest {
+public class OAuthAdminServiceImplTest {
 
     private static final String CONSUMER_KEY = "consumer:key";
     private static final String CONSUMER_SECRET = "consumer:secret";
     private static final String UPDATED_CONSUMER_SECRET = "updated:consumer:secret";
     private static final String INBOUND_AUTH2_TYPE = "oauth2";
+    private static final String ACCESS_TOKEN = "access:token";
+    private static final String USER_ID = "user:id";
 
     @Mock
     private RealmConfiguration realmConfiguration;
@@ -111,8 +136,6 @@ public class OAuthAdminServiceImplTest extends PowerMockIdentityBaseTest {
     private UserRealm userRealm;
     @Mock
     private UserStoreManager userStoreManager;
-    @Mock
-    private OAuthAppDAO oAuthAppDAO;
     @Mock
     private ConfigurationContext configurationContext;
     @Mock
@@ -125,11 +148,31 @@ public class OAuthAdminServiceImplTest extends PowerMockIdentityBaseTest {
     AbstractUserStoreManager mockAbstractUserStoreManager;
     @Mock
     OAuthComponentServiceHolder mockOAuthComponentServiceHolder;
+    @Mock
+    ServiceProvider mockServiceProvider;
+    @Mock
+    OAuthServerConfiguration mockOAuthServerConfiguration;
+    @Mock
+    AccessTokenDAO mockAccessTokenDAO;
+    @Mock
+    AuthorizationCodeDAO mockAuthorizationCodeDAO;
+    @Mock
+    TokenManagementDAO mockTokenManagementDAO;
+
+    private MockedStatic<IdentityTenantUtil> identityTenantUtil;
+
+    @AfterClass
+    public void tearDownClass() throws Exception {
+
+        setPrivateField(OAuthTokenPersistenceFactory.getInstance(), "managementDAO",
+                new TokenManagementDAOImpl());
+        setPrivateField(OAuthTokenPersistenceFactory.getInstance(), "tokenDAO", new AccessTokenDAOImpl());
+    }
 
     @BeforeMethod
     public void setUp() throws Exception {
 
-        MockitoAnnotations.initMocks(this);
+        initMocks(this);
         System.setProperty("carbon.home",
                 System.getProperty("user.dir") + File.separator + "src" + File.separator + "test"
                         + File.separator + "resources");
@@ -138,23 +181,28 @@ public class OAuthAdminServiceImplTest extends PowerMockIdentityBaseTest {
         IdentityTenantUtil.setRealmService(realmService);
         when(realmService.getTenantManager()).thenReturn(tenantManager);
         when(realmService.getBootstrapRealmConfiguration()).thenReturn(realmConfiguration);
+        identityTenantUtil = mockStatic(IdentityTenantUtil.class);
+        identityTenantUtil.when(() -> IdentityTenantUtil.getTenantId(MultitenantConstants.SUPER_TENANT_DOMAIN_NAME))
+                .thenReturn(MultitenantConstants.SUPER_TENANT_ID);
+    }
+
+    @AfterMethod
+    public void tearDown() {
+
+        identityTenantUtil.close();
     }
 
     private void initConfigsAndRealm() throws Exception {
-        IdentityCoreServiceComponent identityCoreServiceComponent = new IdentityCoreServiceComponent();
         ConfigurationContextService configurationContextService = new ConfigurationContextService
                 (configurationContext, null);
-        FieldSetter.setField(identityCoreServiceComponent, identityCoreServiceComponent.getClass().
-                getDeclaredField("configurationContextService"), configurationContextService);
+        setPrivateStaticField(IdentityCoreServiceComponent.class, "configurationContextService",
+                configurationContextService);
         when(configurationContext.getAxisConfiguration()).thenReturn(axisConfiguration);
-
 
         IdentityTenantUtil.setRealmService(realmService);
         when(realmService.getBootstrapRealmConfiguration()).thenReturn(realmConfiguration);
 
-
         when(userRealm.getUserStoreManager()).thenReturn(userStoreManager);
-
     }
 
     @Test
@@ -165,19 +213,22 @@ public class OAuthAdminServiceImplTest extends PowerMockIdentityBaseTest {
         PrivilegedCarbonContext.getThreadLocalCarbonContext().setUsername("admin");
 
         IdentityTenantUtil.setRealmService(realmService);
+        identityTenantUtil.when(IdentityTenantUtil::getRealmService).thenReturn(realmService);
         when(realmService.getBootstrapRealmConfiguration()).thenReturn(realmConfiguration);
 
+        try (MockedConstruction<OAuthAppDAO> mockedConstruction = Mockito.mockConstruction(OAuthAppDAO.class,
+                (mock, context) -> {
+                    when(mock.addOAuthConsumer("admin", -1234, "PRIMARY")).thenReturn(new String[]{"consumer:key",
+                            "consumer:secret"});
+                })) {
+            OAuthAdminServiceImpl oAuthAdminServiceImpl = new OAuthAdminServiceImpl();
+            String[] keySecret = oAuthAdminServiceImpl.registerOAuthConsumer();
 
-        whenNew(OAuthAppDAO.class).withNoArguments().thenReturn(oAuthAppDAO);
-        when(oAuthAppDAO.addOAuthConsumer("admin", -1234, "PRIMARY")).thenReturn(new String[]{"consumer:key",
-                "consumer:secret"});
-        OAuthAdminServiceImpl oAuthAdminServiceImpl = new OAuthAdminServiceImpl();
-        String[] keySecret = oAuthAdminServiceImpl.registerOAuthConsumer();
-
-        Assert.assertNotNull(keySecret);
-        Assert.assertEquals(keySecret.length, 2);
-        Assert.assertEquals(keySecret[0], CONSUMER_KEY);
-        Assert.assertEquals(keySecret[1], CONSUMER_SECRET);
+            Assert.assertNotNull(keySecret);
+            Assert.assertEquals(keySecret.length, 2);
+            Assert.assertEquals(keySecret[0], CONSUMER_KEY);
+            Assert.assertEquals(keySecret[1], CONSUMER_SECRET);
+        }
     }
 
     @DataProvider(name = "getDataForAllOAuthApplicationData")
@@ -188,29 +239,38 @@ public class OAuthAdminServiceImplTest extends PowerMockIdentityBaseTest {
     @Test(dataProvider = "getDataForAllOAuthApplicationData")
     public void testGetAllOAuthApplicationData(String userName) throws Exception {
 
-        PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantDomain("carbon.super");
-        PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantId(-1234);
-        PrivilegedCarbonContext.getThreadLocalCarbonContext().setUsername(userName);
+        try (MockedStatic<IdentityUtil> identityUtil = mockStatic(IdentityUtil.class);
+             MockedStatic<OAuthComponentServiceHolder> oAuthComponentServiceHolder =
+                     mockStatic(OAuthComponentServiceHolder.class);) {
+            PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantDomain("carbon.super");
+            PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantId(-1234);
+            PrivilegedCarbonContext.getThreadLocalCarbonContext().setUsername(userName);
 
-        mockUserstore();
+            mockUserstore(identityUtil, oAuthComponentServiceHolder);
 
-        whenNew(OAuthAppDAO.class).withNoArguments().thenReturn(oAuthAppDAO);
-        OAuthAppDO oAuthAppDO = new OAuthAppDO();
-        AuthenticatedUser authenticatedUser = new AuthenticatedUser();
-        oAuthAppDO.setApplicationName("testapp1");
-        oAuthAppDO.setUser(authenticatedUser);
-        authenticatedUser.setUserName(userName);
-        when(oAuthAppDAO.getOAuthConsumerAppsOfUser(userName, -1234)).thenReturn(new OAuthAppDO[]{oAuthAppDO});
-        OAuthAdminServiceImpl oAuthAdminServiceImpl = new OAuthAdminServiceImpl();
-        try {
-            OAuthConsumerAppDTO[] allOAuthApplicationData =
-                    oAuthAdminServiceImpl.getAllOAuthApplicationData();
-            Assert.assertNotNull(allOAuthApplicationData);
-            Assert.assertEquals(allOAuthApplicationData.length, 1);
-            Assert.assertEquals(allOAuthApplicationData[0].getApplicationName(), "testapp1");
-        } catch (IdentityOAuthAdminException allOAuthApplicationData) {
-            Assert.assertEquals(allOAuthApplicationData.getMessage(),
-                    "User not logged in to get all registered OAuth Applications.");
+            OAuthAppDO oAuthAppDO = new OAuthAppDO();
+            AuthenticatedUser authenticatedUser = new AuthenticatedUser();
+            oAuthAppDO.setApplicationName("testapp1");
+            oAuthAppDO.setUser(authenticatedUser);
+            oAuthAppDO.setBackChannelLogoutUrl(DEFAULT_BACKCHANNEL_LOGOUT_URL);
+            authenticatedUser.setUserName(userName);
+
+            try (MockedConstruction<OAuthAppDAO> mockedConstruction = Mockito.mockConstruction(OAuthAppDAO.class,
+                    (mock, context) -> {
+                        when(mock.getOAuthConsumerAppsOfUser(userName, -1234))
+                                .thenReturn(new OAuthAppDO[]{oAuthAppDO});
+                    })) {
+                OAuthAdminServiceImpl oAuthAdminServiceImpl = new OAuthAdminServiceImpl();
+                try {
+                    OAuthConsumerAppDTO[] allOAuthApplicationData = oAuthAdminServiceImpl.getAllOAuthApplicationData();
+                    Assert.assertNotNull(allOAuthApplicationData);
+                    Assert.assertEquals(allOAuthApplicationData.length, 1);
+                    Assert.assertEquals(allOAuthApplicationData[0].getApplicationName(), "testapp1");
+                } catch (IdentityOAuthAdminException allOAuthApplicationData) {
+                    Assert.assertEquals(allOAuthApplicationData.getMessage(),
+                            "User not logged in to get all registered OAuth Applications.");
+                }
+            }
         }
     }
 
@@ -229,36 +289,45 @@ public class OAuthAdminServiceImplTest extends PowerMockIdentityBaseTest {
     public void testRegisterOAuthApplicationData(String oauthVersion, String userName, String consumerKey, String
             consumerSecret) throws Exception {
 
-        PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantDomain("carbon.super");
-        PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantId(-1234);
-        PrivilegedCarbonContext.getThreadLocalCarbonContext().setUsername(userName);
-        PrivilegedCarbonContext.getThreadLocalCarbonContext().setUserRealm(userRealm);
+        try (MockedStatic<IdentityUtil> identityUtil = mockStatic(IdentityUtil.class);
+             MockedStatic<OAuthComponentServiceHolder> oAuthComponentServiceHolder =
+                     mockStatic(OAuthComponentServiceHolder.class)) {
+            PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantDomain("carbon.super");
+            PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantId(-1234);
+            PrivilegedCarbonContext.getThreadLocalCarbonContext().setUsername(userName);
+            PrivilegedCarbonContext.getThreadLocalCarbonContext().setUserRealm(userRealm);
 
-        OAuthAdminServiceImpl oAuthAdminServiceImpl = new OAuthAdminServiceImpl();
-        OAuthConsumerAppDTO oAuthConsumerAppDTO = new OAuthConsumerAppDTO();
-        oAuthConsumerAppDTO.setApplicationName("SAMPLE_APP1");
-        oAuthConsumerAppDTO.setCallbackUrl("http://localhost:8080/acsUrl");
-        oAuthConsumerAppDTO.setApplicationAccessTokenExpiryTime(1234585);
-        oAuthConsumerAppDTO.setGrantTypes("");
-        oAuthConsumerAppDTO.setUsername(userName);
-        oAuthConsumerAppDTO.setOauthConsumerKey(consumerKey);
-        oAuthConsumerAppDTO.setOauthConsumerSecret(consumerSecret);
-        oAuthConsumerAppDTO.setOAuthVersion(oauthVersion);
-        oAuthConsumerAppDTO.setRenewRefreshTokenEnabled("true");
+            OAuthAdminServiceImpl oAuthAdminServiceImpl = new OAuthAdminServiceImpl();
+            OAuthConsumerAppDTO oAuthConsumerAppDTO = new OAuthConsumerAppDTO();
+            oAuthConsumerAppDTO.setApplicationName("SAMPLE_APP1");
+            oAuthConsumerAppDTO.setCallbackUrl("http://localhost:8080/acsUrl");
+            oAuthConsumerAppDTO.setApplicationAccessTokenExpiryTime(1234585);
+            oAuthConsumerAppDTO.setGrantTypes("");
+            oAuthConsumerAppDTO.setUsername(userName);
+            oAuthConsumerAppDTO.setOauthConsumerKey(consumerKey);
+            oAuthConsumerAppDTO.setOauthConsumerSecret(consumerSecret);
+            oAuthConsumerAppDTO.setOAuthVersion(oauthVersion);
+            oAuthConsumerAppDTO.setRenewRefreshTokenEnabled("true");
+            oAuthConsumerAppDTO.setBackChannelLogoutUrl(DEFAULT_BACKCHANNEL_LOGOUT_URL);
 
-        whenNew(OAuthAppDAO.class).withNoArguments().thenReturn(oAuthAppDAO);
-        doNothing().when(oAuthAppDAO).addOAuthApplication(Matchers.any(OAuthAppDO.class));
+            try (MockedConstruction<OAuthAppDAO> mockedConstruction = Mockito.mockConstruction(OAuthAppDAO.class,
+                    (mock, context) -> {
+                        doNothing().when(mock).addOAuthApplication(any(OAuthAppDO.class));
+                    })) {
 
-        mockUserstore();
+                mockUserstore(identityUtil, oAuthComponentServiceHolder);
 
-        try {
-            oAuthAdminServiceImpl.registerOAuthApplicationData(oAuthConsumerAppDTO);
-        } catch (IdentityOAuthAdminException e) {
-            if (StringUtils.isBlank(userName)) {
-                Assert.assertEquals("No authenticated user found. Failed to register OAuth App", e.getMessage());
-                return;
+                try {
+                    oAuthAdminServiceImpl.registerOAuthApplicationData(oAuthConsumerAppDTO);
+                } catch (IdentityOAuthAdminException e) {
+                    if (StringUtils.isBlank(userName)) {
+                        Assert.assertEquals("No authenticated user found. Failed to register OAuth App",
+                                e.getMessage());
+                        return;
+                    }
+                    Assert.fail("Error while registering OAuth APP");
+                }
             }
-            Assert.fail("Error while registering OAuth APP");
         }
     }
 
@@ -274,42 +343,95 @@ public class OAuthAdminServiceImplTest extends PowerMockIdentityBaseTest {
         PrivilegedCarbonContext.getThreadLocalCarbonContext().setUsername(username);
 
         OAuthAppDO app = buildDummyOAuthAppDO(username);
-        when(oAuthAppDAO.getOAuthConsumerAppsOfUser(username, tenantId)).thenReturn(new OAuthAppDO[]{app});
-        whenNew(OAuthAppDAO.class).withAnyArguments().thenReturn(oAuthAppDAO);
+        try (MockedConstruction<OAuthAppDAO> mockedConstruction = Mockito.mockConstruction(OAuthAppDAO.class,
+                (mock, context) -> {
+                    when(mock.getOAuthConsumerAppsOfUser(username, tenantId)).thenReturn(new OAuthAppDO[]{app});
+                })) {
 
-        OAuthAdminServiceImpl oAuthAdminServiceImpl = new OAuthAdminServiceImpl();
-        OAuthConsumerAppDTO[] oAuthConsumerApps = oAuthAdminServiceImpl.getAllOAuthApplicationData();
-        Assert.assertTrue((oAuthConsumerApps.length == 1), "OAuth consumer application count should be one.");
-        assertAllAttributesOfConsumerAppDTO(oAuthConsumerApps[0], app);
+            OAuthAdminServiceImpl oAuthAdminServiceImpl = new OAuthAdminServiceImpl();
+            OAuthConsumerAppDTO[] oAuthConsumerApps = oAuthAdminServiceImpl.getAllOAuthApplicationData();
+            Assert.assertTrue((oAuthConsumerApps.length == 1), "OAuth consumer application count should be one.");
+            assertAllAttributesOfConsumerAppDTO(oAuthConsumerApps[0], app);
+        }
     }
 
     @Test(expectedExceptions = IdentityOAuthAdminException.class)
     public void testGetAllOAuthApplicationDataException() throws Exception {
 
-        PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantDomain("carbon.super");
-        PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantId(-1234);
-        PrivilegedCarbonContext.getThreadLocalCarbonContext().setUsername(null);
+        try (MockedStatic<IdentityUtil> identityUtil = mockStatic(IdentityUtil.class);
+             MockedStatic<OAuthComponentServiceHolder> oAuthComponentServiceHolder =
+                     mockStatic(OAuthComponentServiceHolder.class);) {
+            PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantDomain("carbon.super");
+            PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantId(-1234);
+            PrivilegedCarbonContext.getThreadLocalCarbonContext().setUsername(null);
 
-        whenNew(OAuthAppDAO.class).withAnyArguments().thenReturn(oAuthAppDAO);
+            mockUserstore(identityUtil, oAuthComponentServiceHolder);
 
-        mockUserstore();
-
-        OAuthAdminServiceImpl oAuthAdminServiceImpl = new OAuthAdminServiceImpl();
-        oAuthAdminServiceImpl.getAllOAuthApplicationData();
+            OAuthAdminServiceImpl oAuthAdminServiceImpl = new OAuthAdminServiceImpl();
+            oAuthAdminServiceImpl.getAllOAuthApplicationData();
+        }
     }
 
-    @Test
-    public void testGetOAuthApplicationData() throws Exception {
+    @DataProvider(name = "setAccessTokenClaims")
+    public Object[][] getOAuthApplicationData() {
 
-        String consumerKey = "some-consumer-key";
+        return new Object[][] {
+                { "v0.0.0", true },
+                { "v1.0.0", true },
+                { "v2.0.0", true },
+                { "v0.0.0", false },
+                { "v1.0.0", false },
+                { "v2.0.0", false }
+        };
+    }
 
-        OAuthAppDO app = buildDummyOAuthAppDO("some-user-name");
-        when(oAuthAppDAO.getAppInformation(consumerKey)).thenReturn(app);
-        whenNew(OAuthAppDAO.class).withAnyArguments().thenReturn(oAuthAppDAO);
+    @Test(dataProvider = "setAccessTokenClaims")
+    public void testGetOAuthApplicationData(String appVersion, boolean claimSeparationFeatureEnabled) throws Exception {
 
-        OAuthAdminServiceImpl oAuthAdminServiceImpl = new OAuthAdminServiceImpl();
-        OAuthConsumerAppDTO oAuthConsumerApp = oAuthAdminServiceImpl.getOAuthApplicationData(consumerKey);
-        assertAllAttributesOfConsumerAppDTO(oAuthConsumerApp, app);
+        try (MockedStatic<OAuthServerConfiguration> oAuthServerConfigurationMockedStatic = mockStatic(
+                OAuthServerConfiguration.class);) {
+            // Mock and initialize the OAuthServerConfiguration.
+            mockOAuthServerConfiguration = mock(OAuthServerConfiguration.class);
+            oAuthServerConfigurationMockedStatic.when(OAuthServerConfiguration::getInstance)
+                    .thenReturn(mockOAuthServerConfiguration);
+            lenient().when(mockOAuthServerConfiguration.getTimeStampSkewInSeconds()).thenReturn(300L);
+
+            try (MockedStatic<IdentityUtil> identityUtil = mockStatic(IdentityUtil.class);
+                 MockedStatic<OAuth2Util> oAuth2Util = mockStatic(OAuth2Util.class);) {
+
+                String consumerKey = "some-consumer-key";
+                Mockito.when(tenantManager.getTenantId(MultitenantConstants.SUPER_TENANT_DOMAIN_NAME))
+                        .thenReturn(MultitenantConstants.SUPER_TENANT_ID);
+
+                identityUtil.when(() -> IdentityUtil.getProperty(ENABLE_CLAIMS_SEPARATION_FOR_ACCESS_TOKEN))
+                        .thenReturn(claimSeparationFeatureEnabled ? "true" : "false");
+
+                mockServiceProvider = mock(ServiceProvider.class);
+                oAuth2Util.when(() -> OAuth2Util.getServiceProvider(anyString(), anyString()))
+                        .thenReturn(mockServiceProvider);
+                when(mockServiceProvider.getApplicationVersion()).thenReturn(appVersion);
+
+                OAuthAppDO app = buildDummyOAuthAppDO("some-user-name");
+                try (MockedConstruction<OAuthAppDAO> mockedConstruction = Mockito.mockConstruction(OAuthAppDAO.class,
+                        (mock, context) -> {
+                            when(mock.getAppInformation(consumerKey, MultitenantConstants.SUPER_TENANT_ID))
+                                    .thenReturn(app);
+                        })) {
+
+                    ApplicationManagementService appMgtService = mock(ApplicationManagementService.class);
+                    OAuth2ServiceComponentHolder.setApplicationMgtService(appMgtService);
+                    when(appMgtService.getServiceProvider(consumerKey, MultitenantConstants.SUPER_TENANT_DOMAIN_NAME))
+                            .thenReturn(mockServiceProvider);
+
+                    OAuthAdminServiceImpl oAuthAdminServiceImpl = new OAuthAdminServiceImpl();
+                    OAuthConsumerAppDTO oAuthConsumerApp = oAuthAdminServiceImpl.getOAuthApplicationData(consumerKey,
+                            MultitenantConstants.SUPER_TENANT_DOMAIN_NAME);
+                    oAuthConsumerApp.setUsername(app.getUser().toString());
+
+                    assertAllAttributesOfConsumerAppDTO(oAuthConsumerApp, app);
+                }
+            }
+        }
     }
 
     private void assertAllAttributesOfConsumerAppDTO(OAuthConsumerAppDTO consumerAppDTO, OAuthAppDO appDO) {
@@ -361,51 +483,66 @@ public class OAuthAdminServiceImplTest extends PowerMockIdentityBaseTest {
 
         String consumerKey = "invalid_consumer_key";
 
-        whenNew(OAuthAppDAO.class).withAnyArguments().thenReturn(oAuthAppDAO);
-        switch (exception) {
-            case "InvalidOAuthClientException":
-                when(oAuthAppDAO.getAppInformation(consumerKey)).thenThrow(InvalidOAuthClientException.class);
-                break;
-            case "IdentityOAuth2Exception":
-                when(oAuthAppDAO.getAppInformation(consumerKey)).thenThrow(IdentityOAuth2Exception.class);
-        }
+        try (MockedConstruction<OAuthAppDAO> mockedConstruction = Mockito.mockConstruction(OAuthAppDAO.class,
+                (mock, context) -> {
+                    switch (exception) {
+                        case "InvalidOAuthClientException":
+                            when(mock.getAppInformation(consumerKey, MultitenantConstants.SUPER_TENANT_ID))
+                                    .thenThrow(InvalidOAuthClientException.class);
+                            break;
+                        case "IdentityOAuth2Exception":
+                            when(mock.getAppInformation(consumerKey, MultitenantConstants.SUPER_TENANT_ID))
+                                    .thenThrow(IdentityOAuth2Exception.class);
+                    }
+                })) {
 
-        OAuthAdminServiceImpl oAuthAdminServiceImpl = new OAuthAdminServiceImpl();
-        oAuthAdminServiceImpl.getOAuthApplicationData(consumerKey);
+            OAuthAdminServiceImpl oAuthAdminServiceImpl = new OAuthAdminServiceImpl();
+            oAuthAdminServiceImpl.getOAuthApplicationData(consumerKey, MultitenantConstants.SUPER_TENANT_DOMAIN_NAME);
+        }
     }
 
     @Test
     public void testGetOAuthApplicationDataByAppName() throws Exception {
 
         String appName = "some-app-name";
+        PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantId(SUPER_TENANT_ID);
 
         // Create oauth application data.
         OAuthAppDO app = buildDummyOAuthAppDO("some-user-name");
-        when(oAuthAppDAO.getAppInformationByAppName(appName)).thenReturn(app);
-        whenNew(OAuthAppDAO.class).withAnyArguments().thenReturn(oAuthAppDAO);
+        try (MockedConstruction<OAuthAppDAO> mockedConstruction = Mockito.mockConstruction(OAuthAppDAO.class,
+                (mock, context) -> {
+                    when(mock.getAppInformationByAppName(appName, SUPER_TENANT_ID)).thenReturn(app);
+                })) {
 
-        OAuthAdminServiceImpl oAuthAdminServiceImpl = new OAuthAdminServiceImpl();
-        OAuthConsumerAppDTO oAuthConsumerApp = oAuthAdminServiceImpl.getOAuthApplicationDataByAppName(appName);
-        Assert.assertEquals(oAuthConsumerApp.getApplicationName(), app.getApplicationName(),
-                "Application name should be same as the application name in app data object.");
+            OAuthAdminServiceImpl oAuthAdminServiceImpl = new OAuthAdminServiceImpl();
+            OAuthConsumerAppDTO oAuthConsumerApp = oAuthAdminServiceImpl.getOAuthApplicationDataByAppName(appName);
+            Assert.assertEquals(oAuthConsumerApp.getApplicationName(), app.getApplicationName(),
+                    "Application name should be same as the application name in app data object.");
+        }
     }
 
     @Test(dataProvider = "getAppInformationExceptions", expectedExceptions = IdentityOAuthAdminException.class)
     public void testGetOAuthApplicationDataByAppNameException(String exception) throws Exception {
 
         String appName = "some-app-name";
+        PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantId(SUPER_TENANT_ID);
 
-        switch (exception) {
-            case "InvalidOAuthClientException":
-                when(oAuthAppDAO.getAppInformationByAppName(appName)).thenThrow(InvalidOAuthClientException.class);
-                break;
-            case "IdentityOAuth2Exception":
-                when(oAuthAppDAO.getAppInformationByAppName(appName)).thenThrow(IdentityOAuth2Exception.class);
+        try (MockedConstruction<OAuthAppDAO> mockedConstruction = Mockito.mockConstruction(OAuthAppDAO.class,
+                (mock, context) -> {
+                    switch (exception) {
+                        case "InvalidOAuthClientException":
+                            when(mock.getAppInformationByAppName(appName, SUPER_TENANT_ID))
+                                    .thenThrow(InvalidOAuthClientException.class);
+                            break;
+                        case "IdentityOAuth2Exception":
+                            when(mock.getAppInformationByAppName(appName, SUPER_TENANT_ID))
+                                    .thenThrow(IdentityOAuth2Exception.class);
+                    }
+                })) {
+
+            OAuthAdminServiceImpl oAuthAdminServiceImpl = new OAuthAdminServiceImpl();
+            oAuthAdminServiceImpl.getOAuthApplicationDataByAppName(appName);
         }
-        whenNew(OAuthAppDAO.class).withAnyArguments().thenReturn(oAuthAppDAO);
-
-        OAuthAdminServiceImpl oAuthAdminServiceImpl = new OAuthAdminServiceImpl();
-        oAuthAdminServiceImpl.getOAuthApplicationDataByAppName(appName);
     }
 
     private OAuthAppDO buildDummyOAuthAppDO(String ownerUserName) {
@@ -452,10 +589,16 @@ public class OAuthAdminServiceImplTest extends PowerMockIdentityBaseTest {
 
         return new Object[][]{
                 // Logged In user , App Owner in Request , App Owner in request exists, Excepted App Owner after update
-                {"admin@carbon.super", "H2/new-app-owner@carbon.super", false, "original-app-owner@wso2.com"},
-                {"admin@carbon.super", "H2/new-app-owner@carbon.super", true, "H2/new-app-owner@carbon.super"},
-                {"admin@wso2.com", "H2/new-app-owner@wso2.com", false, "original-app-owner@wso2.com"},
-                {"admin@wso2.com", "H2/new-app-owner@wso2.com", true, "H2/new-app-owner@wso2.com"}
+                {"admin@carbon.super", "H2/new-app-owner@carbon.super", false, "original-app-owner@wso2.com",
+                        true, "v2.0.0"},
+                {"admin@carbon.super", "H2/new-app-owner@carbon.super", true, "H2/new-app-owner@carbon.super",
+                        true, "v2.0.0"},
+                {"admin@wso2.com", "H2/new-app-owner@wso2.com", false, "original-app-owner@wso2.com",
+                        true, "v2.0.0"},
+                {"admin@wso2.com", "H2/new-app-owner@wso2.com", true, "H2/new-app-owner@wso2.com",
+                        true, "v2.0.0"},
+                {"admin@carbon.super", "H2/new-app-owner@carbon.super", false, "original-app-owner@wso2.com",
+                        false, "v2.0.0"},
         };
     }
 
@@ -478,127 +621,240 @@ public class OAuthAdminServiceImplTest extends PowerMockIdentityBaseTest {
     public void testUpdateConsumerApplication(String loggedInUsername,
                                               String appOwnerInRequest,
                                               boolean appOwnerInRequestExists,
-                                              String expectedAppOwnerAfterUpdate) throws Exception {
+                                              String expectedAppOwnerAfterUpdate,
+                                              boolean claimSeparationFeatureEnabled, String appVersion)
+            throws Exception {
 
-        AuthenticatedUser loggedInUser = buildUser(loggedInUsername);
+        try (MockedStatic<OAuthServerConfiguration> oAuthServerConfigurationMockedStatic = mockStatic(
+                OAuthServerConfiguration.class);) {
+            // Mock and initialize the OAuthServerConfiguration.
+            mockOAuthServerConfiguration = mock(OAuthServerConfiguration.class);
+            oAuthServerConfigurationMockedStatic.when(OAuthServerConfiguration::getInstance)
+                    .thenReturn(mockOAuthServerConfiguration);
+            lenient().when(mockOAuthServerConfiguration.getTimeStampSkewInSeconds()).thenReturn(300L);
 
-        PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantDomain(loggedInUser.getTenantDomain());
-        PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantId(
-                IdentityTenantUtil.getTenantId(loggedInUser.getTenantDomain()));
-        PrivilegedCarbonContext.getThreadLocalCarbonContext().setUsername(loggedInUser.getUserName());
-        PrivilegedCarbonContext.getThreadLocalCarbonContext().setUserRealm(userRealm);
+            try (MockedStatic<IdentityUtil> identityUtil = mockStatic(IdentityUtil.class);
+                 MockedStatic<OAuthComponentServiceHolder> oAuthComponentServiceHolder =
+                         mockStatic(OAuthComponentServiceHolder.class);
+                 MockedStatic<OAuth2Util> oAuth2Util = mockStatic(OAuth2Util.class)) {
 
+                identityUtil.when(() -> IdentityUtil.getProperty(ENABLE_CLAIMS_SEPARATION_FOR_ACCESS_TOKEN))
+                        .thenReturn(claimSeparationFeatureEnabled ? "true" : "false");
 
-        AuthenticatedUser appOwner = buildUser(appOwnerInRequest);
-        String tenantAwareUsernameOfAppOwner =
-                MultitenantUtils.getTenantAwareUsername(appOwner.toFullQualifiedUsername());
+                oAuth2Util.when(() -> OAuth2Util.getServiceProvider(anyString(), anyString()))
+                        .thenReturn(mockServiceProvider);
+                when(mockServiceProvider.getApplicationVersion()).thenReturn(appVersion);
 
-        when(userStoreManager.isExistingUser(tenantAwareUsernameOfAppOwner)).thenReturn(appOwnerInRequestExists);
+                AuthenticatedUser loggedInUser = buildUser(loggedInUsername);
+                identityUtil.when(() -> IdentityUtil.isUserStoreCaseSensitive(anyString(), anyInt())).thenReturn(true);
+                identityUtil.when(() -> IdentityUtil.addDomainToName(anyString(), anyString())).thenCallRealMethod();
 
-        String consumerKey = UUID.randomUUID().toString();
-        OAuthAppDO app = buildDummyOAuthAppDO("original-app-owner");
-        AuthenticatedUser originalOwner = app.getAppOwner();
+                PrivilegedCarbonContext.startTenantFlow();
+                PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantDomain(loggedInUser.getTenantDomain());
+                PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantId(
+                        IdentityTenantUtil.getTenantId(loggedInUser.getTenantDomain()));
+                PrivilegedCarbonContext.getThreadLocalCarbonContext().setUsername(loggedInUser.getUserName());
+                PrivilegedCarbonContext.getThreadLocalCarbonContext().setUserRealm(userRealm);
 
-        OAuthAppDAO oAuthAppDAOMock = PowerMockito.spy(new OAuthAppDAO());
-        OAuthAppDO oAuthAppDO = new OAuthAppDO();
-        PowerMockito.doReturn(true).when(oAuthAppDAOMock, "validateUserForOwnerUpdate", oAuthAppDO);
-        when(oAuthAppDAO.getAppInformation(consumerKey)).thenReturn(app);
-        whenNew(OAuthAppDAO.class).withAnyArguments().thenReturn(oAuthAppDAO);
+                AuthenticatedUser appOwner = buildUser(appOwnerInRequest);
+                String tenantAwareUsernameOfAppOwner =
+                        MultitenantUtils.getTenantAwareUsername(appOwner.toFullQualifiedUsername());
 
-        OAuthAdminServiceImpl oAuthAdminServiceImpl = new OAuthAdminServiceImpl();
-        OAuthConsumerAppDTO consumerAppDTO = new OAuthConsumerAppDTO();
-        consumerAppDTO.setApplicationName("new-application-name");
-        consumerAppDTO.setCallbackUrl("http://new-call-back-url.com");
-        consumerAppDTO.setOauthConsumerKey(consumerKey);
-        consumerAppDTO.setOauthConsumerSecret("some-consumer-secret");
-        consumerAppDTO.setOAuthVersion("new-oauth-version");
-        consumerAppDTO.setUsername(appOwner.toFullQualifiedUsername());
+                when(userStoreManager.isExistingUser(tenantAwareUsernameOfAppOwner)).thenReturn(
+                        appOwnerInRequestExists);
 
-        mockOAuthComponentServiceHolder();
+                String consumerKey = UUID.randomUUID().toString();
+                OAuthAppDO app = buildDummyOAuthAppDO("original-app-owner");
+                AuthenticatedUser originalOwner = app.getAppOwner();
 
-        String tenantDomain = MultitenantUtils.getTenantDomain(appOwnerInRequest);
-        String userStoreDomain = UserCoreUtil.extractDomainFromName(appOwnerInRequest);
-        String domainFreeName = UserCoreUtil.removeDomainFromName(appOwnerInRequest);
-        String username = MultitenantUtils.getTenantAwareUsername(domainFreeName);
+                try (MockedConstruction<OAuthAppDAO> mockedConstruction = Mockito.mockConstruction(OAuthAppDAO.class,
+                        (mock, context) -> {
+                            when(mock.getAppInformation(consumerKey,
+                                    IdentityTenantUtil.getTenantId(loggedInUser.getTenantDomain())))
+                                    .thenReturn(app);
+                        })) {
 
-        org.wso2.carbon.user.core.common.User user = new org.wso2.carbon.user.core.common.User();
-        user.setUsername(username);
-        user.setTenantDomain(tenantDomain);
-        user.setUserStoreDomain(userStoreDomain);
-        Mockito.when(mockAbstractUserStoreManager.getUser(any(), anyString())).thenReturn(user);
-        Mockito.when(mockAbstractUserStoreManager.isExistingUser(anyString())).thenReturn(appOwnerInRequestExists);
+                    ApplicationManagementService appMgtService = mock(ApplicationManagementService.class);
+                    OAuth2ServiceComponentHolder.setApplicationMgtService(appMgtService);
+                    when(appMgtService.getServiceProvider(consumerKey, MultitenantConstants.SUPER_TENANT_DOMAIN_NAME))
+                            .thenReturn(mockServiceProvider);
 
-        mockStatic(IdentityUtil.class);
-        when(IdentityUtil.isUserStoreCaseSensitive(anyString(), anyInt())).thenReturn(true);
-        when(IdentityUtil.addDomainToName(anyString(), anyString())).thenCallRealMethod();
+                    OAuthAdminServiceImpl oAuthAdminServiceImpl = new OAuthAdminServiceImpl();
+                    OAuthConsumerAppDTO consumerAppDTO = new OAuthConsumerAppDTO();
+                    consumerAppDTO.setApplicationName("new-application-name");
+                    consumerAppDTO.setCallbackUrl("http://new-call-back-url.com");
+                    consumerAppDTO.setOauthConsumerKey(consumerKey);
+                    consumerAppDTO.setOauthConsumerSecret("some-consumer-secret");
+                    consumerAppDTO.setOAuthVersion("new-oauth-version");
+                    consumerAppDTO.setUsername(appOwner.toFullQualifiedUsername());
 
-        oAuthAdminServiceImpl.updateConsumerApplication(consumerAppDTO);
-        OAuthConsumerAppDTO updatedOAuthConsumerApp = oAuthAdminServiceImpl.getOAuthApplicationData(consumerKey);
-        Assert.assertEquals(updatedOAuthConsumerApp.getApplicationName(), consumerAppDTO.getApplicationName(),
-                "Updated Application name should be same as the application name in consumerAppDTO data object.");
-        Assert.assertEquals(updatedOAuthConsumerApp.getCallbackUrl(), consumerAppDTO.getCallbackUrl(),
-                "Updated Application callbackUrl should be same as the callbackUrl in consumerAppDTO data object.");
+                    mockOAuthComponentServiceHolder(oAuthComponentServiceHolder);
 
-        if (appOwnerInRequestExists) {
-            // Application update should change the app owner if the app owner sent in the request is a valid user.
-            Assert.assertNotEquals(updatedOAuthConsumerApp.getUsername(), originalOwner.toFullQualifiedUsername());
+                    String tenantDomain = MultitenantUtils.getTenantDomain(appOwnerInRequest);
+                    String userStoreDomain = UserCoreUtil.extractDomainFromName(appOwnerInRequest);
+                    String domainFreeName = UserCoreUtil.removeDomainFromName(appOwnerInRequest);
+                    String username = MultitenantUtils.getTenantAwareUsername(domainFreeName);
+
+                    org.wso2.carbon.user.core.common.User user = new org.wso2.carbon.user.core.common.User();
+                    user.setUsername(username);
+                    user.setTenantDomain(tenantDomain);
+                    user.setUserStoreDomain(userStoreDomain);
+                    Mockito.when(mockAbstractUserStoreManager.getUser(any(), anyString())).thenReturn(user);
+                    Mockito.when(mockAbstractUserStoreManager.isExistingUser(anyString()))
+                            .thenReturn(appOwnerInRequestExists);
+
+                    oAuthAdminServiceImpl.updateConsumerApplication(consumerAppDTO);
+                    OAuthConsumerAppDTO updatedOAuthConsumerApp =
+                            oAuthAdminServiceImpl.getOAuthApplicationData(consumerKey,
+                                    tenantDomain);
+                    Assert.assertEquals(updatedOAuthConsumerApp.getApplicationName(),
+                            consumerAppDTO.getApplicationName(),
+                            "Updated Application name should be same as the application name in consumerAppDTO " +
+                                    "data object.");
+                    Assert.assertEquals(updatedOAuthConsumerApp.getCallbackUrl(), consumerAppDTO.getCallbackUrl(),
+                            "Updated Application callbackUrl should be same as the callbackUrl in consumerAppDTO " +
+                                    "data object.");
+
+                    if (appOwnerInRequestExists) {
+                        // Application update should change the app owner if the app owner sent in the request is a
+                        // valid user.
+                        Assert.assertNotEquals(updatedOAuthConsumerApp.getUsername(),
+                                originalOwner.toFullQualifiedUsername());
+                    }
+                    Assert.assertEquals(updatedOAuthConsumerApp.getUsername(), expectedAppOwnerAfterUpdate);
+                }
+            }
         }
-        Assert.assertEquals(updatedOAuthConsumerApp.getUsername(), expectedAppOwnerAfterUpdate);
-    }
-
-    @Test
-    public void testGetOauthApplicationState() throws Exception {
-
-    }
-
-    @Test
-    public void testUpdateConsumerAppState() throws Exception {
-
     }
 
     @Test
     public void testUpdateOauthSecretKey() throws Exception {
 
-        mockStatic(OAuthUtil.class);
-        when(OAuthUtil.getRandomNumberSecure()).thenReturn(UPDATED_CONSUMER_SECRET);
-        when(OAuthUtil.buildConsumerAppDTO(any())).thenCallRealMethod();
+        try (MockedStatic<OAuthUtil> oAuthUtil = mockStatic(OAuthUtil.class)) {
+            oAuthUtil.when(OAuthUtil::getRandomNumberSecure).thenReturn(UPDATED_CONSUMER_SECRET);
+            oAuthUtil.when(() -> OAuthUtil.buildConsumerAppDTO(any())).thenCallRealMethod();
+            PrivilegedCarbonContext.getThreadLocalCarbonContext()
+                    .setTenantDomain(MultitenantConstants.SUPER_TENANT_DOMAIN_NAME);
+            OAuthAdminServiceImpl oAuthAdminServiceImpl = spy(new OAuthAdminServiceImpl());
+            doNothing().when(oAuthAdminServiceImpl).updateAppAndRevokeTokensAndAuthzCodes(anyString(),
+                    any(Properties.class));
 
-        OAuthAdminServiceImpl oAuthAdminServiceImpl = spy(new OAuthAdminServiceImpl());
-        doNothing().when(oAuthAdminServiceImpl, "updateAppAndRevokeTokensAndAuthzCodes", anyString(),
-                Matchers.any(Properties.class));
+            OAuthAppDO oAuthAppDO = new OAuthAppDO();
+            oAuthAppDO.setOauthConsumerKey(CONSUMER_KEY);
+            oAuthAppDO.setOauthConsumerSecret(UPDATED_CONSUMER_SECRET);
+            oAuthAppDO.setBackChannelLogoutUrl(DEFAULT_BACKCHANNEL_LOGOUT_URL);
 
-        whenNew(OAuthAppDAO.class).withNoArguments().thenReturn(oAuthAppDAO);
+            AuthenticatedUser authenticatedUser = new AuthenticatedUser();
+            authenticatedUser.setUserName("test_user");
+            oAuthAppDO.setAppOwner(authenticatedUser);
 
-        OAuthAppDO oAuthAppDO = new OAuthAppDO();
-        oAuthAppDO.setOauthConsumerKey(CONSUMER_KEY);
-        oAuthAppDO.setOauthConsumerSecret(UPDATED_CONSUMER_SECRET);
+            try (MockedConstruction<OAuthAppDAO> mockedConstruction = Mockito.mockConstruction(OAuthAppDAO.class,
+                    (mock, context) -> {
+                        when(mock.getAppInformation(CONSUMER_KEY, MultitenantConstants.SUPER_TENANT_ID)).thenReturn(
+                                oAuthAppDO);
+                    })) {
 
-        AuthenticatedUser authenticatedUser = new AuthenticatedUser();
-        authenticatedUser.setUserName("test_user");
-        oAuthAppDO.setAppOwner(authenticatedUser);
+                OAuthConsumerAppDTO oAuthConsumerAppDTO;
+                oAuthConsumerAppDTO = oAuthAdminServiceImpl.updateAndRetrieveOauthSecretKey(CONSUMER_KEY);
 
-        when(oAuthAppDAO.getAppInformation(CONSUMER_KEY)).thenReturn(oAuthAppDO);
-
-        OAuthConsumerAppDTO oAuthConsumerAppDTO;
-        oAuthConsumerAppDTO = oAuthAdminServiceImpl.updateAndRetrieveOauthSecretKey(CONSUMER_KEY);
-
-        Assert.assertEquals(oAuthConsumerAppDTO.getOauthConsumerSecret(), UPDATED_CONSUMER_SECRET);
+                Assert.assertEquals(oAuthConsumerAppDTO.getOauthConsumerSecret(), UPDATED_CONSUMER_SECRET);
+            }
+        }
     }
 
     @Test(expectedExceptions = IdentityOAuthAdminException.class)
     public void testUpdateOauthSecretKeyWithException() throws Exception {
 
-        mockStatic(OAuthUtil.class);
-        when(OAuthUtil.getRandomNumberSecure()).thenReturn(UPDATED_CONSUMER_SECRET);
-        OAuthAdminServiceImpl oAuthAdminServiceImpl = spy(new OAuthAdminServiceImpl());
-        doThrow(new IdentityOAuthAdminException("Error while regenerating consumer secret")).when(oAuthAdminServiceImpl,
-                "updateAppAndRevokeTokensAndAuthzCodes", anyString(), Matchers.any(Properties.class));
-        oAuthAdminServiceImpl.updateAndRetrieveOauthSecretKey(CONSUMER_KEY);
+        try (MockedStatic<OAuthUtil> oAuthUtil = mockStatic(OAuthUtil.class)) {
+            oAuthUtil.when(OAuthUtil::getRandomNumberSecure).thenReturn(UPDATED_CONSUMER_SECRET);
+            OAuthAdminServiceImpl oAuthAdminServiceImpl = spy(new OAuthAdminServiceImpl());
+            doThrow(new IdentityOAuthAdminException("Error while regenerating consumer secret")).when(
+                    oAuthAdminServiceImpl).updateAppAndRevokeTokensAndAuthzCodes(anyString(), any(Properties.class));
+            oAuthAdminServiceImpl.updateAndRetrieveOauthSecretKey(CONSUMER_KEY);
+        }
     }
 
-    @Test
-    public void testRemoveOAuthApplicationData() throws Exception {
+    @DataProvider(name = "persistenceProcessorDataProvider")
+    public Object[][] persistenceProcessorDataProvider() {
 
+        return new Object[][]{
+                {new EncryptionDecryptionPersistenceProcessor(), false},
+                {new EncryptionDecryptionPersistenceProcessor(), true},
+                {new HashingPersistenceProcessor(), false},
+                {new PlainTextPersistenceProcessor(), false}
+        };
+    }
+
+    @Test(dataProvider = "persistenceProcessorDataProvider")
+    public void testClearTokenCacheForEachPersistenceProcessor(
+            TokenPersistenceProcessor tokenPersistenceProcessor, boolean expectException) throws Exception {
+
+        try (MockedStatic<OAuthTokenPersistenceFactory> mockedOAuthTokenPersistenceFactory =
+                     mockStatic(OAuthTokenPersistenceFactory.class);
+             MockedStatic<OAuth2Util> oAuth2Util = mockStatic(OAuth2Util.class);
+             MockedStatic<CryptoUtil> mockedCryptoUtil = mockStatic(CryptoUtil.class);
+             MockedStatic<IdentityUtil> identityUtil = mockStatic(IdentityUtil.class);
+             MockedStatic<OAuthUtil> oAuthUtil = mockStatic(OAuthUtil.class)) {
+
+            Set<AccessTokenDO> activeTokens = getDetailedTokens();
+            OAuthAdminServiceImpl oAuthAdminServiceImpl = new OAuthAdminServiceImpl();
+
+            OAuthTokenPersistenceFactory mockTokenPersistenceFactory = mock(OAuthTokenPersistenceFactory.class);
+            mockedOAuthTokenPersistenceFactory.when(OAuthTokenPersistenceFactory::getInstance)
+                    .thenReturn(mockTokenPersistenceFactory);
+            when(mockTokenPersistenceFactory.getAccessTokenDAO()).thenReturn(mockAccessTokenDAO);
+            when(mockTokenPersistenceFactory.getAuthorizationCodeDAO()).thenReturn(mockAuthorizationCodeDAO);
+            when(mockTokenPersistenceFactory.getTokenManagementDAO()).thenReturn(mockTokenManagementDAO);
+            when(mockAccessTokenDAO.getActiveAcessTokenDataByConsumerKey(CONSUMER_KEY)).thenReturn(activeTokens);
+
+            CryptoUtil mockCryptoUtilInstance = mock(CryptoUtil.class);
+            mockedCryptoUtil.when(CryptoUtil::getDefaultCryptoUtil).thenReturn(mockCryptoUtilInstance);
+            oAuth2Util.when(OAuth2Util::getPersistenceProcessor).thenReturn(tokenPersistenceProcessor);
+
+            if (expectException) {
+                when(mockCryptoUtilInstance.base64DecodeAndDecrypt(anyString())).thenThrow(new CryptoException());
+                oAuthUtil.when(() -> OAuthUtil.handleError(anyString(), any(Exception.class)))
+                        .thenAnswer(invocation -> {
+                            String msg = invocation.getArgument(0);
+                            Exception ex = invocation.getArgument(1);
+                            return new IdentityOAuthAdminException(msg, ex);
+                        });
+                try {
+                    oAuthAdminServiceImpl.updateAppAndRevokeTokensAndAuthzCodes(CONSUMER_KEY, new Properties());
+                    Assert.fail("Expected IdentityOAuthAdminException to be thrown.");
+                } catch (IdentityOAuthAdminException e) {
+                    Assert.assertTrue(e.getMessage().contains(
+                            "Failed to retrieve the pre-processed access token for consumer key"));
+                    verify(mockCryptoUtilInstance, times(1)).base64DecodeAndDecrypt(anyString());
+                }
+            } else {
+                byte[] mockDecryptedData = CONSUMER_KEY.getBytes();
+                when(mockCryptoUtilInstance.base64DecodeAndDecrypt(anyString())).thenReturn(mockDecryptedData);
+                oAuthAdminServiceImpl.updateAppAndRevokeTokensAndAuthzCodes(CONSUMER_KEY, new Properties());
+
+                if (tokenPersistenceProcessor instanceof EncryptionDecryptionPersistenceProcessor) {
+                    verify(mockCryptoUtilInstance, times(2)).base64DecodeAndDecrypt(anyString());
+                } else {
+                    verify(mockCryptoUtilInstance, never()).base64DecodeAndDecrypt(anyString());
+                }
+            }
+        }
+    }
+
+    private static Set<AccessTokenDO> getDetailedTokens() {
+
+        Set<AccessTokenDO> activeDetailedTokens = new HashSet<>();
+        AccessTokenDO accessTokenDO1 = new AccessTokenDO();
+        AccessTokenDO accessTokenDO2 = new AccessTokenDO();
+        accessTokenDO1.setAccessToken(ACCESS_TOKEN);
+        accessTokenDO2.setAccessToken(ACCESS_TOKEN);
+        AuthenticatedUser authenticatedUser = new AuthenticatedUser();
+        authenticatedUser.setUserId(USER_ID);
+        accessTokenDO1.setAuthzUser(authenticatedUser);
+        accessTokenDO2.setAuthzUser(authenticatedUser);
+        activeDetailedTokens.add(accessTokenDO1);
+        activeDetailedTokens.add(accessTokenDO2);
+        return activeDetailedTokens;
     }
 
     @Test
@@ -630,53 +886,50 @@ public class OAuthAdminServiceImplTest extends PowerMockIdentityBaseTest {
         oAuthAppDO.setOauthConsumerKey(consumerKey);
         oAuthAppDO.setApplicationName("some-user-name");
 
-        when(oAuthAppDAO.getAppInformation(consumerKey)).thenReturn(oAuthAppDO);
-        PowerMockito.whenNew(OAuthAppDAO.class).withNoArguments().thenReturn(oAuthAppDAO);
+        try (MockedConstruction<OAuthAppDAO> mockedConstruction = Mockito.mockConstruction(OAuthAppDAO.class,
+                (mock, context) -> {
+                    when(mock.getAppInformation(consumerKey)).thenReturn(oAuthAppDO);
+                })) {
 
-        AuthenticatedUser user = buildUser("some-user-name");
-        user.setUserId(userId);
-        user.setFederatedIdPName(TestConstants.LOCAL_IDP);
+            AuthenticatedUser user = buildUser("some-user-name");
+            user.setUserId(userId);
+            user.setFederatedIdPName(TestConstants.LOCAL_IDP);
 
-        OAuthAppRevocationRequestDTO oAuthAppRevocationRequestDTO = new OAuthAppRevocationRequestDTO();
-        oAuthAppRevocationRequestDTO.setConsumerKey(consumerKey);
+            OAuthAppRevocationRequestDTO oAuthAppRevocationRequestDTO = new OAuthAppRevocationRequestDTO();
+            oAuthAppRevocationRequestDTO.setConsumerKey(consumerKey);
 
-        AccessTokenDO dummyToken = new AccessTokenDO();
-        dummyToken.setAccessToken(accessToken);
-        dummyToken.setRefreshToken(refreshToken);
-        dummyToken.setAuthzUser(user);
-        dummyToken.setScope(new String[]{"openid"});
-        Set<AccessTokenDO> accessTokenDOSet = new HashSet<>();
-        accessTokenDOSet.add(dummyToken);
+            AccessTokenDO dummyToken = new AccessTokenDO();
+            dummyToken.setAccessToken(accessToken);
+            dummyToken.setRefreshToken(refreshToken);
+            dummyToken.setAuthzUser(user);
+            dummyToken.setScope(new String[]{"openid"});
+            Set<AccessTokenDO> accessTokenDOSet = new HashSet<>();
+            accessTokenDOSet.add(dummyToken);
 
-        OAuthTokenPersistenceFactory tokenPersistenceFactory = OAuthTokenPersistenceFactory.getInstance();
+            TokenManagementDAOImpl mockTokenManagementDAOImpl = mock(TokenManagementDAOImpl.class);
+            setPrivateField(OAuthTokenPersistenceFactory.getInstance(), "managementDAO", mockTokenManagementDAOImpl);
 
-        TokenManagementDAOImpl mockTokenManagementDAOImpl = mock(TokenManagementDAOImpl.class);
-        FieldSetter.setField(tokenPersistenceFactory,
-                tokenPersistenceFactory.getClass().getDeclaredField("managementDAO"), mockTokenManagementDAOImpl);
+            AccessTokenDAO mockAccessTokenDAO = mock(AccessTokenDAO.class);
+            setPrivateField(OAuthTokenPersistenceFactory.getInstance(), "tokenDAO", mockAccessTokenDAO);
 
-        AccessTokenDAO mockAccessTokenDAO = mock(AccessTokenDAO.class);
-        FieldSetter.setField(tokenPersistenceFactory,
-                tokenPersistenceFactory.getClass().getDeclaredField("tokenDAO"), mockAccessTokenDAO);
+            when(mockAccessTokenDAO.getActiveAcessTokenDataByConsumerKey(anyString()))
+                    .thenReturn(accessTokenDOSet);
+            OAuthRevocationResponseDTO expectedOAuthRevocationResponseDTO = new OAuthRevocationResponseDTO();
+            expectedOAuthRevocationResponseDTO.setError(false);
 
+            ApplicationManagementService appMgtService = mock(ApplicationManagementService.class);
+            when(appMgtService.getServiceProviderNameByClientId(consumerKey, INBOUND_AUTH2_TYPE,
+                    user.getTenantDomain())).
+                    thenReturn(oAuthAppDO.getApplicationName());
+            OAuth2ServiceComponentHolder.setApplicationMgtService(appMgtService);
 
-        when(mockAccessTokenDAO.getActiveAcessTokenDataByConsumerKey(anyString()))
-                .thenReturn(accessTokenDOSet);
-        OAuthRevocationResponseDTO expectedOAuthRevocationResponseDTO = new OAuthRevocationResponseDTO();
-        expectedOAuthRevocationResponseDTO.setError(false);
+            OAuthAdminServiceImpl oAuthAdminServiceImpl = spy(new OAuthAdminServiceImpl());
 
-        ApplicationManagementService appMgtService = mock(ApplicationManagementService.class);
-        when(appMgtService.getServiceProviderNameByClientId(consumerKey, INBOUND_AUTH2_TYPE, user.getTenantDomain())).
-                thenReturn(oAuthAppDO.getApplicationName());
-        OAuth2ServiceComponentHolder.setApplicationMgtService(appMgtService);
-
-        OAuthAdminServiceImpl oAuthAdminServiceImpl = spy(new OAuthAdminServiceImpl());
-        doNothing().when(oAuthAdminServiceImpl, "triggerPreApplicationTokenRevokeListeners", anyObject());
-        doNothing().when(oAuthAdminServiceImpl, "triggerPostApplicationTokenRevokeListeners", anyObject(),
-                anyObject(), anyObject());
-
-        OAuthRevocationResponseDTO actualOAuthRevocationResponseDTO = oAuthAdminServiceImpl
-                .revokeIssuedTokensByApplication(oAuthAppRevocationRequestDTO);
-        Assert.assertEquals(actualOAuthRevocationResponseDTO.isError(), expectedOAuthRevocationResponseDTO.isError());
+            OAuthRevocationResponseDTO actualOAuthRevocationResponseDTO = oAuthAdminServiceImpl
+                    .revokeIssuedTokensByApplication(oAuthAppRevocationRequestDTO);
+            Assert.assertEquals(actualOAuthRevocationResponseDTO.isError(),
+                    expectedOAuthRevocationResponseDTO.isError());
+        }
     }
 
     @Test
@@ -686,7 +939,6 @@ public class OAuthAdminServiceImplTest extends PowerMockIdentityBaseTest {
         oAuthAppRevocationRequestDTO.setConsumerKey("");
 
         OAuthAdminServiceImpl oAuthAdminServiceImpl = spy(new OAuthAdminServiceImpl());
-        doNothing().when(oAuthAdminServiceImpl, "triggerPreApplicationTokenRevokeListeners", anyObject());
 
         OAuthRevocationResponseDTO actualOAuthRevocationResponseDTO = oAuthAdminServiceImpl
                 .revokeIssuedTokensByApplication(oAuthAppRevocationRequestDTO);
@@ -706,7 +958,7 @@ public class OAuthAdminServiceImplTest extends PowerMockIdentityBaseTest {
     }
 
     @Test(description = "Test validating invalid audiences", dataProvider = "invalidAudienceDataProvider")
-    public void testValidateAudiencesWithInvalidAudiences(String[] invalidAudience) {
+    public void testValidateAudiencesWithInvalidAudiences(String[] invalidAudience) throws Exception {
 
         OAuthConsumerAppDTO appDTO = new OAuthConsumerAppDTO();
         appDTO.setAudiences(invalidAudience);
@@ -714,10 +966,11 @@ public class OAuthAdminServiceImplTest extends PowerMockIdentityBaseTest {
         OAuthAdminServiceImpl oAuthAdminService = new OAuthAdminServiceImpl();
 
         try {
-            invokeMethod(oAuthAdminService, "validateAudiences", appDTO);
-        } catch (Exception ex) {
-            Assert.assertTrue(ex instanceof IdentityOAuthClientException);
-            Assert.assertEquals(((IdentityOAuthClientException) ex).getErrorCode(),
+            invokePrivateMethod(oAuthAdminService, "validateAudiences", appDTO);
+        } catch (InvocationTargetException ex) {
+            // When the invoked method throws an exception it is wrapped in an InvocationTargetException.
+            Assert.assertTrue(ex.getTargetException() instanceof IdentityOAuthClientException);
+            Assert.assertEquals(((IdentityOAuthClientException) ex.getTargetException()).getErrorCode(),
                     Error.INVALID_REQUEST.getErrorCode());
         }
     }
@@ -740,27 +993,420 @@ public class OAuthAdminServiceImplTest extends PowerMockIdentityBaseTest {
         appDTO.setAudiences(validaAudience);
 
         OAuthAdminServiceImpl oAuthAdminService = new OAuthAdminServiceImpl();
-        invokeMethod(oAuthAdminService, "validateAudiences", appDTO);
+        invokePrivateMethod(oAuthAdminService, "validateAudiences", appDTO);
     }
 
-    private void mockUserstore() throws Exception {
+    private void mockUserstore(MockedStatic<IdentityUtil> identityUtil,
+                               MockedStatic<OAuthComponentServiceHolder> oAuthComponentServiceHolder) throws Exception {
 
-        mockOAuthComponentServiceHolder();
+        mockOAuthComponentServiceHolder(oAuthComponentServiceHolder);
         Mockito.when(userStoreManager.isExistingUser(anyString())).thenReturn(true);
 
-        mockStatic(IdentityUtil.class);
-        when(IdentityUtil.isUserStoreCaseSensitive(anyString(), anyInt())).thenReturn(true);
+        identityUtil.when(() -> IdentityUtil.isUserStoreCaseSensitive(anyString(), anyInt())).thenReturn(true);
     }
 
-    private void mockOAuthComponentServiceHolder() throws Exception {
+    private void mockOAuthComponentServiceHolder(MockedStatic<OAuthComponentServiceHolder> oAuthComponentServiceHolder)
+            throws Exception {
 
-        mockStatic(OAuthComponentServiceHolder.class);
-        Mockito.when(OAuthComponentServiceHolder.getInstance())
+        oAuthComponentServiceHolder.when(OAuthComponentServiceHolder::getInstance)
                 .thenReturn(mockOAuthComponentServiceHolder);
         Mockito.when(mockOAuthComponentServiceHolder.getRealmService()).thenReturn(realmService);
         Mockito.when(tenantManager.getTenant(anyInt())).thenReturn(mockTenant);
         Mockito.when(mockTenant.getAssociatedOrganizationUUID()).thenReturn(null);
         Mockito.when(realmService.getTenantUserRealm(anyInt())).thenReturn(userRealm);
         Mockito.when(userRealm.getUserStoreManager()).thenReturn(mockAbstractUserStoreManager);
+    }
+
+    @Test(description = "Test validating invalid token auth methods")
+    private void testValidateTokenAuthenticationWithValidAuthentication() throws Exception {
+
+        try (MockedStatic<IdentityUtil> identityUtil = mockStatic(IdentityUtil.class)) {
+            List<String> tokenEndPointAuthMethods = new ArrayList<>();
+            tokenEndPointAuthMethods.add("private_key_jwt");
+            tokenEndPointAuthMethods.add("tls_client_auth");
+            identityUtil.when(() -> IdentityUtil.getPropertyAsList(anyString())).thenReturn(tokenEndPointAuthMethods);
+            OAuthAdminServiceImpl oAuthAdminService = new OAuthAdminServiceImpl();
+            invokePrivateMethod(oAuthAdminService, "validateFAPITokenAuthMethods",
+                    "tls_client_auth");
+        }
+    }
+
+    @Test(description = "Test validating invalid token auth methods")
+    private void testValidateTokenAuthenticationWithInvalidAuthentication() throws Exception {
+
+        try (MockedStatic<IdentityUtil> identityUtil = mockStatic(IdentityUtil.class)) {
+            List<String> tokenEndPointAuthMethods = new ArrayList<>();
+            tokenEndPointAuthMethods.add("private_key_jwt");
+            tokenEndPointAuthMethods.add("tls_client_auth");
+            identityUtil.when(() -> IdentityUtil.getPropertyAsList(anyString())).thenReturn(tokenEndPointAuthMethods);
+            OAuthAdminServiceImpl oAuthAdminService = new OAuthAdminServiceImpl();
+            try {
+                invokePrivateMethod(oAuthAdminService, "validateFAPITokenAuthMethods",
+                        "invalid_auth");
+            } catch (InvocationTargetException ex) {
+                Assert.assertTrue(ex.getTargetException() instanceof IdentityOAuthClientException);
+                Assert.assertEquals(((IdentityOAuthClientException) ex.getTargetException()).getErrorCode(),
+                        Error.INVALID_REQUEST.getErrorCode());
+            }
+        }
+    }
+
+    @DataProvider(name = "getTokenAuthMethodAndTokenReuseConfigData")
+    public Object[][] getTokenAuthMethodAndTokenReuseConfigData() {
+
+        return new Object[][]{
+                // Client auth method, Expected result.
+                {"private_key_jwt", null, true},
+                {null, true, true},
+                {"", true, true},
+                {" ", true, true},
+                {"dummy_method", true, true},
+                {"private_key_jwt", true, false},
+                {null, null, false},
+                {"dummy_method", null, false}};
+    }
+
+    @Test(description = "Test invalid reuse token config & client auth method combination.",
+            dataProvider = "getTokenAuthMethodAndTokenReuseConfigData")
+    private void testInvalidReuseTokenRequestAndClientAuthMethod(String tokenEndpointAuthMethod,
+                                                                  Boolean tokenEndpointAllowReusePvtKeyJwt,
+                                                                  boolean expectedResult) throws Exception {
+
+        OAuthAdminServiceImpl oAuthAdminService = new OAuthAdminServiceImpl();
+
+        Assert.assertEquals(invokePrivateMethod(oAuthAdminService,
+                "isInvalidTokenEPReusePvtKeyJwtRequest", new Class[]{String.class, Boolean.class},
+                tokenEndpointAuthMethod, tokenEndpointAllowReusePvtKeyJwt), expectedResult);
+    }
+
+    @Test(description = "Test validating signature algorithm")
+    private void testValidateSignatureAlgorithm() throws Exception {
+
+        try (MockedStatic<IdentityUtil> identityUtil = mockStatic(IdentityUtil.class)) {
+            List<String> validFAPISignatureAlgorithms = new ArrayList<>();
+            validFAPISignatureAlgorithms.add("PS256");
+            validFAPISignatureAlgorithms.add("ES256");
+            identityUtil.when(() -> IdentityUtil.getPropertyAsList(anyString()))
+                    .thenReturn(validFAPISignatureAlgorithms);
+            OAuthAdminServiceImpl oAuthAdminService = new OAuthAdminServiceImpl();
+            invokePrivateMethod(oAuthAdminService, "validateFAPISignatureAlgorithms", "PS256");
+        }
+    }
+
+    @Test(description = "Test validating signature algorithm with invalid value")
+    private void testValidateSignatureAlgorithmWithInvalidValue() throws Exception {
+
+        try (MockedStatic<IdentityUtil> identityUtil = mockStatic(IdentityUtil.class)) {
+            List<String> validFAPISignatureAlgorithms = new ArrayList<>();
+            validFAPISignatureAlgorithms.add("PS256");
+            validFAPISignatureAlgorithms.add("ES256");
+            identityUtil.when(() -> IdentityUtil.getPropertyAsList(anyString()))
+                    .thenReturn(validFAPISignatureAlgorithms);
+            OAuthAdminServiceImpl oAuthAdminService = new OAuthAdminServiceImpl();
+            try {
+                invokePrivateMethod(oAuthAdminService, "validateFAPISignatureAlgorithms", "PS256");
+            } catch (Exception ex) {
+                Assert.assertTrue(ex instanceof IdentityOAuthClientException);
+                Assert.assertEquals(((IdentityOAuthClientException) ex).getErrorCode(),
+                        Error.INVALID_REQUEST.getErrorCode());
+            }
+        }
+    }
+
+    @Test(description = "Test validating encryption algorithm with invalid value")
+    private void testValidateEncryptionAlgorithm() throws Exception {
+
+        OAuthAdminServiceImpl oAuthAdminService = new OAuthAdminServiceImpl();
+        try {
+            invokePrivateMethod(oAuthAdminService, "validateFAPIEncryptionAlgorithms", "RSA1_5");
+        } catch (InvocationTargetException ex) {
+            Assert.assertTrue(ex.getTargetException() instanceof IdentityOAuthClientException);
+            Assert.assertEquals(((IdentityOAuthClientException) ex.getTargetException()).getErrorCode(),
+                    Error.INVALID_REQUEST.getErrorCode());
+        }
+    }
+
+    @DataProvider(name = "validCallbackURIDataProvider")
+    public Object[][] getValidCallBackURIs() {
+
+        List<String> callBackURI = new ArrayList<>();
+        callBackURI.add("https://localhost:8080/callback");
+        callBackURI.add("https://localhost:8080/callback1");
+        callBackURI.add("https://localhost:8080/callback2");
+        return new Object[][]{{callBackURI}};
+    }
+
+    @DataProvider(name = "invalidHostNameDataProvider")
+    public Object[][] getInvalidCallBackURIs() {
+
+        List<String> callBackURI = new ArrayList<>();
+        callBackURI.add("https://localhost:8080/callback");
+        callBackURI.add("https://abc:8080/callback1");
+        callBackURI.add("https://localhost:8080/callback2");
+        return new Object[][]{ {callBackURI}};
+    }
+
+    @Test(description = "Test validating multiple redirect URIs have the same host name when PPId is enabled",
+            dataProvider = "validCallbackURIDataProvider")
+    private void testValidateRedirectURIForPPID (List<String> callBackURIs) throws Exception {
+
+        OAuthAdminServiceImpl oAuthAdminService = new OAuthAdminServiceImpl();
+        invokePrivateMethod(oAuthAdminService, "validateRedirectURIForPPID", callBackURIs);
+    }
+
+    @Test(description = "Test validating multiple redirect URIs have the same host name when PPId is enabled",
+            dataProvider = "invalidHostNameDataProvider")
+    private void testValidateRedirectURIForPPIDWithDifferentHosts(List<String> callBackURIs) throws Exception {
+
+        OAuthAdminServiceImpl oAuthAdminService = new OAuthAdminServiceImpl();
+        try {
+            invokePrivateMethod(oAuthAdminService, "validateRedirectURIForPPID", callBackURIs);
+        } catch (InvocationTargetException ex) {
+            Assert.assertTrue(ex.getTargetException() instanceof IdentityOAuthClientException);
+            Assert.assertEquals(((IdentityOAuthClientException) ex.getTargetException()).getErrorCode(),
+                    Error.INVALID_SUBJECT_TYPE_UPDATE.getErrorCode());
+        }
+    }
+
+    @Test(description = "Test validating schem of sectorIdentifierUri")
+    private void testValidateSectorIdentifierUriInvalidScheme() throws Exception {
+
+        OAuthAdminServiceImpl oAuthAdminService = new OAuthAdminServiceImpl();
+        List<String> callBackURI = new ArrayList<>();
+        callBackURI.add("https://localhost:8080/callback");
+
+        try {
+            invokePrivateMethod(oAuthAdminService, "validateSectorIdentifierURI",
+                    "http://localhost:8080/callback", callBackURI);
+        } catch (InvocationTargetException ex) {
+            Assert.assertTrue(ex.getTargetException() instanceof IdentityOAuthClientException);
+            Assert.assertEquals(((IdentityOAuthClientException) ex.getTargetException()).getErrorCode(),
+                    Error.INVALID_REQUEST.getErrorCode());
+        }
+    }
+
+    @Test(description = "Test validating all callBackURIs are present in sectorIdentifierURI array retrieved")
+    private void testValidateSectorIdentifierUri() throws Exception {
+
+        try (MockedStatic<IdentityUtil> identityUtil = mockStatic(IdentityUtil.class)) {
+            OAuthAdminServiceImpl oAuthAdminService = new OAuthAdminServiceImpl();
+            List<String> callBackURI = new ArrayList<>();
+            callBackURI.add("https://localhost:8080/callback");
+            callBackURI.add("https://localhost:8080/callback/a");
+
+            identityUtil.when(() -> IdentityUtil.getProperty(anyString())).thenReturn("true");
+            ObjectMapper mapper = new ObjectMapper();
+            ArrayNode arrNode = mapper.createArrayNode();
+            arrNode.add("https://localhost:8080/callback");
+            arrNode.add("https://localhost:8080/callback/a");
+            arrNode.add("https://localhost:8080/callback/b");
+            String sectorIdentifierUri = "https://localhost:8080/sectors";
+            try (MockedConstruction<ObjectMapper> mockedConstruction = Mockito.mockConstruction(ObjectMapper.class,
+                    (mock, context) -> {
+                        when(mock.readTree(URI.create(sectorIdentifierUri).toURL())).thenReturn(arrNode);
+                    })) {
+
+                invokePrivateMethod(oAuthAdminService, "validateSectorIdentifierURI", sectorIdentifierUri,
+                        callBackURI);
+            }
+        }
+    }
+
+    @Test(description = "Test validating error if all callBackURIs are not present in " +
+            "sectorIdentifierURI array retrieved")
+    private void testValidateSectorIdentifierUriWithoutMatchingURLs() throws Exception {
+
+        try (MockedStatic<IdentityUtil> identityUtil = mockStatic(IdentityUtil.class)) {
+            OAuthAdminServiceImpl oAuthAdminService = new OAuthAdminServiceImpl();
+            List<String> callBackURI = new ArrayList<>();
+            callBackURI.add("https://localhost:8080/callback");
+            callBackURI.add("https://localhost:8080/callback/a");
+
+            identityUtil.when(() -> IdentityUtil.getProperty(anyString())).thenReturn("true");
+            ObjectMapper mapper = new ObjectMapper();
+            ArrayNode arrNode = mapper.createArrayNode();
+            arrNode.add("https://localhost:8080/callback");
+            arrNode.add("https://localhost:8080/callback/b");
+            String sectorIdentifierUri = "https://localhost:8080/sectors";
+            try (MockedConstruction<ObjectMapper> mockedConstruction = Mockito.mockConstruction(ObjectMapper.class,
+                    (mock, context) -> {
+                        when(mock.readTree(URI.create(sectorIdentifierUri).toURL())).thenReturn(arrNode);
+                    })) {
+
+                invokePrivateMethod(oAuthAdminService, "validateSectorIdentifierURI", sectorIdentifierUri,
+                        callBackURI);
+            } catch (InvocationTargetException ex) {
+                Assert.assertTrue(ex.getTargetException() instanceof IdentityOAuthClientException);
+                Assert.assertEquals(((IdentityOAuthClientException) ex.getTargetException()).getErrorCode(),
+                        Error.INVALID_REQUEST.getErrorCode());
+            }
+        }
+    }
+
+    @Test(description = "Test obtaining url list from regex")
+    private void testGetRedirectURIList() throws Exception {
+
+        OAuthAdminServiceImpl oAuthAdminService = new OAuthAdminServiceImpl();
+
+        String callbackURls = "regexp=(http://TestApp.com|http://TestApp.com/a)";
+        OAuthConsumerAppDTO appDTO = new OAuthConsumerAppDTO();
+        appDTO.setCallbackUrl(callbackURls);
+        List<String> redirectURIList =
+                (List<String>) invokePrivateMethod(oAuthAdminService, "getRedirectURIList", appDTO);
+
+        Assert.assertEquals(redirectURIList.size(), 2);
+        Assert.assertTrue(redirectURIList.contains("http://TestApp.com"));
+        Assert.assertTrue(redirectURIList.contains("http://TestApp.com/a"));
+
+    }
+
+    private void setPrivateStaticField(Class<?> clazz, String fieldName, Object newValue)
+            throws NoSuchFieldException, IllegalAccessException {
+
+        Field field = clazz.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(null, newValue);
+    }
+
+    private void setPrivateField(Object object, String fieldName, Object value) throws Exception {
+
+        Field field = object.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(object, value);
+    }
+
+    private Object invokePrivateMethod(Object object, String methodName, Object... params) throws Exception {
+
+        Class<?>[] paramTypes = new Class[params.length];
+        for (int i = 0; i < params.length; i++) {
+            paramTypes[i] = params[i].getClass();
+            if (params[i] instanceof ArrayList) {
+                paramTypes[i] = params[i].getClass().getInterfaces()[0];
+            }
+        }
+        Method method = object.getClass().getDeclaredMethod(methodName, paramTypes);
+        method.setAccessible(true);
+        return method.invoke(object, params);
+    }
+
+    private Object invokePrivateMethod(Object object, String methodName, Class<?>[] paramTypes, Object... params)
+            throws Exception {
+
+        Method method = object.getClass().getDeclaredMethod(methodName, paramTypes);
+        method.setAccessible(true);
+        return method.invoke(object, params);
+    }
+
+    @Test(dataProvider = "addScopeDataProvider")
+    public void testAddScope(ScopeDTO scope, List<ExternalClaim> oidcDialectClaims) throws Exception {
+
+        try (MockedStatic<OAuthTokenPersistenceFactory> mockedOAuthTokenPersistenceFactory =
+                     mockStatic(OAuthTokenPersistenceFactory.class);
+             MockedStatic<OAuth2ServiceComponentHolder> mockedOAuth2ServiceComponentHolder =
+                     mockStatic(OAuth2ServiceComponentHolder.class)) {
+
+            OAuth2ServiceComponentHolder mockServiceComponentHolder = mock(OAuth2ServiceComponentHolder.class);
+            OAuthTokenPersistenceFactory mockTokenPersistenceFactory = mock(OAuthTokenPersistenceFactory.class);
+            ClaimMetadataManagementService claimService = mock(ClaimMetadataManagementService.class);
+            ScopeClaimMappingDAO scopeClaimMappingDAO = mock(ScopeClaimMappingDAO.class);
+
+            mockedOAuthTokenPersistenceFactory.when(OAuthTokenPersistenceFactory::getInstance)
+                    .thenReturn(mockTokenPersistenceFactory);
+            mockedOAuth2ServiceComponentHolder.when(OAuth2ServiceComponentHolder::getInstance)
+                    .thenReturn(mockServiceComponentHolder);
+
+            PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantId(SUPER_TENANT_ID);
+            identityTenantUtil.when(() -> IdentityTenantUtil.getTenantDomain(SUPER_TENANT_ID))
+                    .thenReturn(SUPER_TENANT_DOMAIN_NAME);
+            when(mockTokenPersistenceFactory.getScopeClaimMappingDAO()).thenReturn(scopeClaimMappingDAO);
+            doNothing().when(scopeClaimMappingDAO).addScope(scope, SUPER_TENANT_ID);
+            when(mockServiceComponentHolder.getClaimMetadataManagementService()).thenReturn(claimService);
+            when(claimService.getExternalClaims(OIDC_DIALECT, SUPER_TENANT_DOMAIN_NAME)).thenReturn(oidcDialectClaims);
+
+            OAuthAdminServiceImpl service = new OAuthAdminServiceImpl();
+            service.addScope(scope);
+            verify(scopeClaimMappingDAO, times(1)).addScope(any(), anyInt());
+            verify(claimService, times(2)).updateExternalClaim(any(), anyString());
+
+            ClaimMetadataException claimMetadataException = new ClaimMetadataException("error");
+            when(claimService.getExternalClaims(OIDC_DIALECT, SUPER_TENANT_DOMAIN_NAME))
+                    .thenThrow(claimMetadataException);
+            assertThrows(IdentityOAuthAdminException.class, () -> service.addScope(scope));
+        }
+    }
+
+    @Test(dataProvider = "addScopeDataProvider")
+    public void testUpdateScope(ScopeDTO scope, List<ExternalClaim> oidcDialectClaims) throws Exception {
+
+        try (MockedStatic<OAuthTokenPersistenceFactory> mockedOAuthTokenPersistenceFactory =
+                     mockStatic(OAuthTokenPersistenceFactory.class);
+             MockedStatic<OAuth2ServiceComponentHolder> mockedOAuth2ServiceComponentHolder =
+                     mockStatic(OAuth2ServiceComponentHolder.class)) {
+
+            OAuth2ServiceComponentHolder mockServiceComponentHolder = mock(OAuth2ServiceComponentHolder.class);
+            OAuthTokenPersistenceFactory mockTokenPersistenceFactory = mock(OAuthTokenPersistenceFactory.class);
+            ClaimMetadataManagementService claimService = mock(ClaimMetadataManagementService.class);
+            ScopeClaimMappingDAO scopeClaimMappingDAO = mock(ScopeClaimMappingDAO.class);
+
+            mockedOAuthTokenPersistenceFactory.when(OAuthTokenPersistenceFactory::getInstance)
+                    .thenReturn(mockTokenPersistenceFactory);
+            mockedOAuth2ServiceComponentHolder.when(OAuth2ServiceComponentHolder::getInstance)
+                    .thenReturn(mockServiceComponentHolder);
+
+            PrivilegedCarbonContext.startTenantFlow();
+            PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantId(SUPER_TENANT_ID);
+            identityTenantUtil.when(() -> IdentityTenantUtil.getTenantDomain(SUPER_TENANT_ID))
+                    .thenReturn(SUPER_TENANT_DOMAIN_NAME);
+            when(mockTokenPersistenceFactory.getScopeClaimMappingDAO()).thenReturn(scopeClaimMappingDAO);
+            doNothing().when(scopeClaimMappingDAO).addScope(scope, SUPER_TENANT_ID);
+            when(scopeClaimMappingDAO.isScopeExist(any(), anyInt())).thenReturn(true);
+            when(mockServiceComponentHolder.getClaimMetadataManagementService()).thenReturn(claimService);
+            when(claimService.getExternalClaims(OIDC_DIALECT, SUPER_TENANT_DOMAIN_NAME)).thenReturn(oidcDialectClaims);
+
+            OAuthAdminServiceImpl service = new OAuthAdminServiceImpl();
+            service.updateScope(scope);
+            verify(scopeClaimMappingDAO, times(1)).updateScope(any(), anyInt());
+            verify(claimService, times(2)).updateExternalClaim(any(), anyString());
+
+            ClaimMetadataException claimMetadataException = new ClaimMetadataException("error");
+            when(claimService.getExternalClaims(OIDC_DIALECT, SUPER_TENANT_DOMAIN_NAME))
+                    .thenThrow(claimMetadataException);
+            assertThrows(IdentityOAuthAdminException.class, () -> service.addScope(scope));
+        }
+    }
+
+    @DataProvider(name = "addScopeDataProvider")
+    public Object[][] addScopeDataProvider() {
+
+        ScopeDTO scope = new ScopeDTO();
+        scope.setName("dummy_claim");
+        scope.setDisplayName("Dummy Claim");
+        scope.setDescription("Dummy Claim Description");
+        scope.setClaim(new String[] {
+                "http://wso2.org/oidc/claim/email",
+                "http://wso2.org/oidc/claim/profile"
+        });
+        List<ExternalClaim> oidcDialectClaims = new ArrayList<>();
+
+        ExternalClaim claim1 = new ExternalClaim("http://wso2.org/oidc",
+                "http://wso2.org/oidc/claim/email", "http://wso2.org/claims/emailaddress");
+        ExternalClaim claim2 = new ExternalClaim("http://wso2.org/oidc",
+                "http://wso2.org/oidc/claim/profile", "http://wso2.org/claims/url");
+        ExternalClaim claim3 = new ExternalClaim("http://wso2.org/oidc",
+                "http://wso2.org/oidc/claim/first_name", "http://wso2.org/claims/givenname");
+        ExternalClaim claim4 = new ExternalClaim("http://wso2.org/oidc",
+                "http://wso2.org/oidc/claim/last_name", "http://wso2.org/claims/lastname");
+        ExternalClaim claim5 = new ExternalClaim("http://wso2.org/oidc",
+                "http://wso2.org/oidc/claim/phone_number", "http://wso2.org/claims/mobile");
+
+        oidcDialectClaims.add(claim1);
+        oidcDialectClaims.add(claim2);
+        oidcDialectClaims.add(claim3);
+        oidcDialectClaims.add(claim4);
+        oidcDialectClaims.add(claim5);
+
+        return new Object[][]{
+                {scope, oidcDialectClaims}
+        };
     }
 }

@@ -19,10 +19,23 @@ package org.wso2.carbon.identity.oauth.dao;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonTypeName;
+import org.apache.commons.lang.StringUtils;
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
+import org.wso2.carbon.identity.application.common.IdentityApplicationManagementException;
 import org.wso2.carbon.identity.application.common.model.InboundConfigurationProtocol;
+import org.wso2.carbon.identity.application.common.model.ServiceProvider;
+import org.wso2.carbon.identity.application.common.util.IdentityApplicationConstants;
+import org.wso2.carbon.identity.core.ServiceURLBuilder;
+import org.wso2.carbon.identity.core.URLBuilderException;
+import org.wso2.carbon.identity.oauth.internal.OAuthComponentServiceHolder;
+import org.wso2.carbon.identity.oauth2.internal.OAuth2ServiceComponentHolder;
+import org.wso2.carbon.identity.organization.management.service.OrganizationManager;
+import org.wso2.carbon.identity.organization.management.service.exception.OrganizationManagementException;
+import org.wso2.carbon.identity.organization.management.service.util.OrganizationManagementUtil;
+import org.wso2.carbon.utils.multitenancy.MultitenantConstants;
 
 import java.io.Serializable;
+import java.util.Arrays;
 
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
@@ -30,6 +43,11 @@ import javax.xml.bind.annotation.XmlElement;
 import javax.xml.bind.annotation.XmlElementWrapper;
 import javax.xml.bind.annotation.XmlRootElement;
 import javax.xml.bind.annotation.XmlTransient;
+
+
+import static org.wso2.carbon.identity.application.mgt.ApplicationConstants.DEFAULT_BACKCHANNEL_LOGOUT_URL;
+import static org.wso2.carbon.identity.application.mgt.ApplicationConstants.IS_FRAGMENT_APP;
+import static org.wso2.carbon.identity.configuration.mgt.core.constant.ConfigurationConstants.TENANT_CONTEXT_PATH_COMPONENT;
 
 /**
  * OAuth application data object.
@@ -54,6 +72,8 @@ public class OAuthAppDO extends InboundConfigurationProtocol implements Serializ
     private String[] scopeValidators;
     private boolean pkceSupportPlain;
     private boolean pkceMandatory;
+    private boolean hybridFlowEnabled;
+    private String hybridFlowResponseType;
     private String state;
     private long userAccessTokenExpiryTime;
     private long applicationAccessTokenExpiryTime;
@@ -78,6 +98,22 @@ public class OAuthAppDO extends InboundConfigurationProtocol implements Serializ
     private String tokenBindingType;
     private boolean tokenRevocationWithIDPSessionTerminationEnabled;
     private boolean tokenBindingValidationEnabled;
+    private String tokenEndpointAuthMethod;
+    private Boolean tokenEndpointAllowReusePvtKeyJwt;
+    private String tokenEndpointAuthSignatureAlgorithm;
+    private String sectorIdentifierURI;
+    private String idTokenSignatureAlgorithm;
+    private String requestObjectSignatureAlgorithm;
+    private String tlsClientAuthSubjectDN;
+    private boolean requirePushedAuthorizationRequests;
+    private boolean tlsClientCertificateBoundAccessTokens;
+    private String subjectType;
+    private String requestObjectEncryptionAlgorithm;
+    private String requestObjectEncryptionMethod;
+    private boolean fapiConformanceEnabled;
+    private boolean subjectTokenEnabled;
+    private int subjectTokenExpiryTime;
+    private String[] accessTokenClaims;
 
     public AuthenticatedUser getAppOwner() {
 
@@ -182,8 +218,24 @@ public class OAuthAppDO extends InboundConfigurationProtocol implements Serializ
         return pkceMandatory;
     }
 
+    public boolean isHybridFlowEnabled() {
+        return hybridFlowEnabled;
+    }
+
+    public void setHybridFlowEnabled(boolean hybridFlowEnabled) {
+        this.hybridFlowEnabled = hybridFlowEnabled;
+    }
+
     public void setPkceMandatory(boolean pkceMandatory) {
         this.pkceMandatory = pkceMandatory;
+    }
+
+    public String getHybridFlowResponseType() {
+        return hybridFlowResponseType;
+    }
+
+    public void setHybridFlowResponseType(String hybridFlowResponseType) {
+        this.hybridFlowResponseType = hybridFlowResponseType;
     }
 
     public void setState(String state) {
@@ -265,6 +317,9 @@ public class OAuthAppDO extends InboundConfigurationProtocol implements Serializ
 
     public String getBackChannelLogoutUrl() {
 
+        if (StringUtils.isBlank(backChannelLogoutUrl)) {
+            this.backChannelLogoutUrl = resolveBackChannelLogoutURLForSharedApps();
+        }
         return backChannelLogoutUrl;
     }
 
@@ -340,5 +395,225 @@ public class OAuthAppDO extends InboundConfigurationProtocol implements Serializ
     public void setTokenBindingValidationEnabled(boolean tokenBindingValidationEnabled) {
 
         this.tokenBindingValidationEnabled = tokenBindingValidationEnabled;
+    }
+    public String getTokenEndpointAuthMethod() {
+
+        return tokenEndpointAuthMethod;
+    }
+
+    public void setTokenEndpointAuthMethod(String tokenEndpointAuthMethod) {
+
+        this.tokenEndpointAuthMethod = tokenEndpointAuthMethod;
+    }
+
+    public Boolean isTokenEndpointAllowReusePvtKeyJwt() {
+
+        return tokenEndpointAllowReusePvtKeyJwt;
+    }
+
+    public void setTokenEndpointAllowReusePvtKeyJwt(Boolean tokenEndpointAllowReusePvtKeyJwt) {
+
+        this.tokenEndpointAllowReusePvtKeyJwt = tokenEndpointAllowReusePvtKeyJwt;
+    }
+
+    public String getTokenEndpointAuthSignatureAlgorithm() {
+
+        return tokenEndpointAuthSignatureAlgorithm;
+    }
+
+    public void setTokenEndpointAuthSignatureAlgorithm(String tokenEndpointAuthSignatureAlgorithm) {
+
+        this.tokenEndpointAuthSignatureAlgorithm = tokenEndpointAuthSignatureAlgorithm;
+    }
+
+    public String getSectorIdentifierURI() {
+
+        return sectorIdentifierURI;
+    }
+
+    public void setSectorIdentifierURI(String sectorIdentifierURI) {
+
+        this.sectorIdentifierURI = sectorIdentifierURI;
+    }
+
+    public String getIdTokenSignatureAlgorithm() {
+
+        return idTokenSignatureAlgorithm;
+    }
+
+    public void setIdTokenSignatureAlgorithm(String idTokenSignatureAlgorithm) {
+
+        this.idTokenSignatureAlgorithm = idTokenSignatureAlgorithm;
+    }
+    public String getRequestObjectSignatureAlgorithm() {
+
+        return requestObjectSignatureAlgorithm;
+    }
+
+    public void setRequestObjectSignatureAlgorithm(String requestObjectSignatureAlgorithm) {
+
+        this.requestObjectSignatureAlgorithm = requestObjectSignatureAlgorithm;
+    }
+
+    public String getTlsClientAuthSubjectDN() {
+
+        return tlsClientAuthSubjectDN;
+    }
+
+    public void setTlsClientAuthSubjectDN(String tlsClientAuthSubjectDN) {
+
+        this.tlsClientAuthSubjectDN = tlsClientAuthSubjectDN;
+    }
+
+    public boolean isRequirePushedAuthorizationRequests() {
+
+        return requirePushedAuthorizationRequests;
+    }
+
+    public void setRequirePushedAuthorizationRequests(boolean requirePushedAuthorizationRequests) {
+
+        this.requirePushedAuthorizationRequests = requirePushedAuthorizationRequests;
+    }
+
+    public boolean isTlsClientCertificateBoundAccessTokens() {
+
+        return tlsClientCertificateBoundAccessTokens;
+    }
+
+    public void setTlsClientCertificateBoundAccessTokens(boolean tlsClientCertificateBoundAccessTokens) {
+
+        this.tlsClientCertificateBoundAccessTokens = tlsClientCertificateBoundAccessTokens;
+    }
+
+    public String getSubjectType() {
+
+        return subjectType;
+    }
+
+    public void setSubjectType(String subjectType) {
+
+        this.subjectType = subjectType;
+    }
+
+    public String getRequestObjectEncryptionAlgorithm() {
+
+        return requestObjectEncryptionAlgorithm;
+    }
+
+    public void setRequestObjectEncryptionAlgorithm(String requestObjectEncryptionAlgorithm) {
+
+        this.requestObjectEncryptionAlgorithm = requestObjectEncryptionAlgorithm;
+    }
+
+    public String getRequestObjectEncryptionMethod() {
+
+        return requestObjectEncryptionMethod;
+    }
+
+    public void setRequestObjectEncryptionMethod(String requestObjectEncryptionMethod) {
+
+        this.requestObjectEncryptionMethod = requestObjectEncryptionMethod;
+    }
+
+    public boolean isFapiConformanceEnabled() {
+
+        return fapiConformanceEnabled;
+    }
+
+    public void setFapiConformanceEnabled(boolean fapiConformant) {
+
+        fapiConformanceEnabled = fapiConformant;
+    }
+
+
+    public boolean isSubjectTokenEnabled() {
+
+        return subjectTokenEnabled;
+    }
+
+    public void setSubjectTokenEnabled(boolean subjectTokenEnabled) {
+
+        this.subjectTokenEnabled = subjectTokenEnabled;
+    }
+
+    public int getSubjectTokenExpiryTime() {
+
+        return subjectTokenExpiryTime;
+    }
+
+    public void setSubjectTokenExpiryTime(int subjectTokenExpiryTime) {
+
+        this.subjectTokenExpiryTime = subjectTokenExpiryTime;
+    }
+
+    public String[] getAccessTokenClaims() {
+
+        return accessTokenClaims;
+    }
+
+    public void setAccessTokenClaims(String[] accessTokenClaims) {
+
+        this.accessTokenClaims = accessTokenClaims;
+    }
+
+    /**
+     * Resolves the back-channel logout URL for the shared oAuth apps in organizations.
+     *
+     * @return Back-channel logout URL.
+     */
+    private String resolveBackChannelLogoutURLForSharedApps() {
+
+        String tenantDomain = getTenantDomain();
+        try {
+            if (OrganizationManagementUtil.isOrganization(tenantDomain)) {
+                ServiceProvider orgApplication = getOrgApplication(oauthConsumerKey, tenantDomain);
+                boolean isFragmentApp = Arrays.stream(orgApplication.getSpProperties())
+                        .anyMatch(property -> IS_FRAGMENT_APP.equals(property.getName()) &&
+                                Boolean.parseBoolean(property.getValue()));
+
+                if (isFragmentApp) {
+                    String rootOrganizationId = getOrganizationManager().getPrimaryOrganizationId(tenantDomain);
+                    return resolveBackChannelLogoutURL(rootOrganizationId);
+                }
+            }
+        } catch (OrganizationManagementException | URLBuilderException | IdentityApplicationManagementException e) {
+            return null;
+        }
+        return null;
+    }
+
+    private String resolveBackChannelLogoutURL(String organizationId)
+            throws URLBuilderException, OrganizationManagementException {
+
+        String tenantDomain = getOrganizationManager().resolveTenantDomain(organizationId);
+        if (MultitenantConstants.SUPER_TENANT_DOMAIN_NAME.equals(tenantDomain)) {
+            return ServiceURLBuilder.create()
+                    .addPath(DEFAULT_BACKCHANNEL_LOGOUT_URL)
+                    .setTenant(tenantDomain).build().getAbsolutePublicURL();
+        }
+        String context = String.format(TENANT_CONTEXT_PATH_COMPONENT, tenantDomain)
+                + DEFAULT_BACKCHANNEL_LOGOUT_URL;
+        return ServiceURLBuilder.create().addPath(context).build().getAbsolutePublicURL();
+    }
+
+    private OrganizationManager getOrganizationManager() {
+
+        return OAuthComponentServiceHolder.getInstance().getOrganizationManager();
+    }
+
+    private String getTenantDomain() {
+
+        String tenantDomain = MultitenantConstants.SUPER_TENANT_DOMAIN_NAME;
+        if (getAppOwner() != null) {
+            tenantDomain = getAppOwner().getTenantDomain();
+        }
+        return tenantDomain;
+    }
+
+    public static ServiceProvider getOrgApplication(String clientId, String tenantDomain)
+            throws IdentityApplicationManagementException {
+
+        return OAuth2ServiceComponentHolder.getApplicationMgtService().getServiceProviderByClientId(
+                clientId, IdentityApplicationConstants.OAuth2.NAME, tenantDomain);
     }
 }

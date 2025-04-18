@@ -20,6 +20,7 @@ package org.wso2.carbon.identity.oauth.cache;
 
 import org.wso2.carbon.identity.application.common.model.ClaimMapping;
 import org.wso2.carbon.identity.oauth2.model.AccessTokenExtendedAttributes;
+import org.wso2.carbon.identity.oauth2.model.FederatedTokenDO;
 import org.wso2.carbon.identity.openidconnect.model.RequestObject;
 
 import java.util.ArrayList;
@@ -65,6 +66,8 @@ public class AuthorizationGrantCacheEntry extends CacheEntry {
 
     private boolean hasNonOIDCClaims;
 
+    private Map<ClaimMapping, String> mappedRemoteClaims;
+
     /*
         OIDC sub claim. This should be formatted based on the Service Provider configurations to append
         userStoreDomain and tenantDomain.
@@ -79,6 +82,15 @@ public class AuthorizationGrantCacheEntry extends CacheEntry {
 
     private boolean isRequestObjectFlow;
     private AccessTokenExtendedAttributes accessTokenExtendedAttributes;
+    private boolean isApiBasedAuthRequest;
+
+    private List<FederatedTokenDO> federatedTokens;
+
+    private List<String> audiences;
+
+    private Map<String, Object> customClaims;
+
+    private boolean isPreIssueAccessTokenActionsExecuted;
 
     public String getSubjectClaim() {
         return subjectClaim;
@@ -140,6 +152,10 @@ public class AuthorizationGrantCacheEntry extends CacheEntry {
         this.userAttributes = userAttributes;
     }
 
+    public AuthorizationGrantCacheEntry() {
+
+    }
+
     public String getNonceValue() {
         return nonceValue;
     }
@@ -190,6 +206,16 @@ public class AuthorizationGrantCacheEntry extends CacheEntry {
 
     public void setPkceCodeChallengeMethod(String pkceCodeChallengeMethod) {
         this.pkceCodeChallengeMethod = pkceCodeChallengeMethod;
+    }
+
+    public List<FederatedTokenDO> getFederatedTokens() {
+
+        return federatedTokens;
+    }
+
+    public void setFederatedTokens(List<FederatedTokenDO> federatedTokens) {
+
+        this.federatedTokens = federatedTokens;
     }
 
     /**
@@ -325,5 +351,56 @@ public class AuthorizationGrantCacheEntry extends CacheEntry {
     public void setAccessTokenExtensionDO(AccessTokenExtendedAttributes accessTokenExtendedAttributes) {
 
         this.accessTokenExtendedAttributes = accessTokenExtendedAttributes;
+    }
+
+    public boolean isApiBasedAuthRequest() {
+
+        return isApiBasedAuthRequest;
+    }
+
+    public void setApiBasedAuthRequest(boolean apiBasedAuthRequest) {
+
+        isApiBasedAuthRequest = apiBasedAuthRequest;
+    }
+
+    public List<String> getAudiences() {
+
+        return audiences;
+    }
+
+    public void setAudiences(List<String> audiences) {
+
+        this.audiences = audiences;
+    }
+
+    public Map<String, Object> getCustomClaims() {
+
+        return customClaims;
+    }
+
+    public void setCustomClaims(Map<String, Object> customClaims) {
+
+        this.customClaims = customClaims;
+    }
+
+    public boolean isPreIssueAccessTokenActionsExecuted() {
+
+        return isPreIssueAccessTokenActionsExecuted;
+    }
+
+    public void setPreIssueAccessTokenActionsExecuted(boolean preIssueAccessTokenActionsExecuted) {
+
+        isPreIssueAccessTokenActionsExecuted = preIssueAccessTokenActionsExecuted;
+    }
+
+    public Map<ClaimMapping, String> getMappedRemoteClaims() {
+
+        return mappedRemoteClaims;
+    }
+
+    public void setMappedRemoteClaims(
+            Map<ClaimMapping, String> mappedRemoteClaims) {
+
+        this.mappedRemoteClaims = mappedRemoteClaims;
     }
 }

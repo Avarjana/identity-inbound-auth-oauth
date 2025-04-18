@@ -20,9 +20,12 @@ package org.wso2.carbon.identity.oauth2.token;
 
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
 import org.wso2.carbon.identity.oauth.common.OAuthConstants;
+import org.wso2.carbon.identity.oauth.rar.model.AuthorizationDetails;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2AccessTokenReqDTO;
 import org.wso2.carbon.identity.oauth2.token.bindings.TokenBinding;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 
 /**
@@ -53,6 +56,16 @@ public class OAuthTokenReqMessageContext {
     private TokenBinding tokenBinding;
 
     private boolean isConsentedToken;
+
+    private boolean isImpersonationRequest;
+
+    private boolean preIssueAccessTokenActionsExecuted;
+
+    private List<String> audiences;
+
+    private Map<String, Object> additionalAccessTokenClaims;
+
+    private AuthorizationDetails authorizationDetails;
 
     public OAuthTokenReqMessageContext(OAuth2AccessTokenReqDTO oauth2AccessTokenReqDTO) {
 
@@ -94,11 +107,19 @@ public class OAuthTokenReqMessageContext {
         this.tenantID = tenantID;
     }
 
+    /**
+     * Get the validity period of the token.
+     * @return validity period of the token in milliseconds
+     */
     public long getValidityPeriod() {
 
         return validityPeriod;
     }
 
+    /**
+     * Set the validity period of the token.
+     * @param validityPeriod validity period of the token in milliseconds
+     */
     public void setValidityPeriod(long validityPeriod) {
 
         this.validityPeriod = validityPeriod;
@@ -155,10 +176,12 @@ public class OAuthTokenReqMessageContext {
     }
 
     public String[] getAuthorizedInternalScopes() {
+
         return authorizedInternalScopes;
     }
 
     public void setAuthorizedInternalScopes(String[] authorizedInternalScopes) {
+
         this.authorizedInternalScopes = authorizedInternalScopes;
     }
 
@@ -170,5 +193,67 @@ public class OAuthTokenReqMessageContext {
     public void setConsentedToken(boolean consentedToken) {
 
         isConsentedToken = consentedToken;
+    }
+
+    public boolean isImpersonationRequest() {
+
+        return isImpersonationRequest;
+    }
+
+    public void setImpersonationRequest(boolean impersonationRequest) {
+
+        isImpersonationRequest = impersonationRequest;
+    }
+
+    public boolean isPreIssueAccessTokenActionsExecuted() {
+
+        return preIssueAccessTokenActionsExecuted;
+    }
+
+    public void setPreIssueAccessTokenActionsExecuted(boolean preIssueAccessTokenActionsExecuted) {
+
+        this.preIssueAccessTokenActionsExecuted = preIssueAccessTokenActionsExecuted;
+    }
+
+    public List<String> getAudiences() {
+
+        return audiences;
+    }
+
+    public void setAudiences(List<String> audiences) {
+
+        this.audiences = audiences;
+    }
+
+    public Map<String, Object> getAdditionalAccessTokenClaims() {
+
+        return additionalAccessTokenClaims;
+    }
+
+    public void setAdditionalAccessTokenClaims(Map<String, Object> additionalAccessTokenClaims) {
+
+        this.additionalAccessTokenClaims = additionalAccessTokenClaims;
+    }
+
+    /**
+     * Retrieves the user consented or authorized authorization details.
+     *
+     * @return the {@link AuthorizationDetails} instance representing the rich authorization requests.
+     * If no authorization details are available, it will return {@code null}.
+     */
+    public AuthorizationDetails getAuthorizationDetails() {
+
+        return this.authorizationDetails;
+    }
+
+    /**
+     * Sets the validated authorization details.
+     * This method updates the authorization details with the provided {@link AuthorizationDetails} instance.
+     *
+     * @param authorizationDetails the {@link AuthorizationDetails} to set.
+     */
+    public void setAuthorizationDetails(final AuthorizationDetails authorizationDetails) {
+
+        this.authorizationDetails = authorizationDetails;
     }
 }

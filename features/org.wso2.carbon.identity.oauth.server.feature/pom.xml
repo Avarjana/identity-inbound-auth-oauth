@@ -22,7 +22,7 @@
         <groupId>org.wso2.carbon.identity.inbound.auth.oauth2</groupId>
         <artifactId>identity-inbound-auth-oauth</artifactId>
         <relativePath>../../pom.xml</relativePath>
-        <version>6.11.88-SNAPSHOT</version>
+        <version>7.0.278-SNAPSHOT</version>
     </parent>
 
     <modelVersion>4.0.0</modelVersion>
@@ -116,6 +116,10 @@
             <groupId>org.wso2.carbon.identity.inbound.auth.oauth2</groupId>
             <artifactId>org.wso2.carbon.identity.oauth.client.authn.filter</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.wso2.carbon.identity.inbound.auth.oauth2</groupId>
+            <artifactId>org.wso2.carbon.identity.client.attestation.filter</artifactId>
+        </dependency>
     </dependencies>
 
     <build>
@@ -153,6 +157,14 @@
                                 <artifactItem>
                                     <groupId>org.wso2.carbon.identity.inbound.auth.oauth2</groupId>
                                     <artifactId>org.wso2.carbon.identity.oauth.client.authn.filter</artifactId>
+                                    <version>${project.version}</version>
+                                    <type>jar</type>
+                                    <overWrite>true</overWrite>
+                                    <outputDirectory>${basedir}/src/main/resources/runtimes/cxf3</outputDirectory>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.wso2.carbon.identity.inbound.auth.oauth2</groupId>
+                                    <artifactId>org.wso2.carbon.identity.client.attestation.filter</artifactId>
                                     <version>${project.version}</version>
                                     <type>jar</type>
                                     <overWrite>true</overWrite>
@@ -231,6 +243,9 @@
                                 <bundleDef>org.wso2.orbit.joda-time:joda-time</bundleDef>
                                 <bundleDef>org.wso2.carbon.identity.inbound.auth.oauth2:org.wso2.carbon.identity.webfinger</bundleDef>
                                 <bundleDef>org.wso2.carbon.identity.inbound.auth.oauth2:org.wso2.carbon.identity.discovery</bundleDef>
+                                <bundleDef>org.wso2.orbit.io.vertx:vertx-json-schema</bundleDef>
+                                <bundleDef>org.wso2.orbit.io.netty:netty-all</bundleDef>
+                                <bundleDef>org.wso2.carbon.identity.inbound.auth.oauth2:org.wso2.carbon.identity.oauth.rar</bundleDef>
                             </bundles>
                             <importFeatures>
                                 <importFeatureDef>org.wso2.carbon.core:compatible:${carbon.kernel.feature.version}</importFeatureDef>

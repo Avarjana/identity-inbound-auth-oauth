@@ -1,7 +1,7 @@
 /*
- * Copyright (c) 2013, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
+ * Copyright (c) 2013-2024, WSO2 LLC. (http://www.wso2.com).
  *
- * WSO2 Inc. licenses this file to you under the Apache License,
+ * WSO2 LLC. licenses this file to you under the Apache License,
  * Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License.
  * You may obtain a copy of the License at
@@ -11,7 +11,7 @@
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
+ * KIND, either express or implied.  See the License for the
  * specific language governing permissions and limitations
  * under the License.
  */
@@ -26,10 +26,22 @@ import org.osgi.service.component.annotations.Component;
 import org.osgi.service.component.annotations.Reference;
 import org.osgi.service.component.annotations.ReferenceCardinality;
 import org.osgi.service.component.annotations.ReferencePolicy;
+import org.wso2.carbon.identity.action.execution.api.service.ActionExecutionRequestBuilder;
+import org.wso2.carbon.identity.action.execution.api.service.ActionExecutionResponseProcessor;
+import org.wso2.carbon.identity.action.execution.api.service.ActionExecutorService;
 import org.wso2.carbon.identity.application.authentication.framework.UserSessionManagementService;
+import org.wso2.carbon.identity.application.mgt.ApplicationManagementService;
+import org.wso2.carbon.identity.application.mgt.AuthorizedAPIManagementService;
+import org.wso2.carbon.identity.application.mgt.inbound.protocol.ApplicationInboundAuthConfigHandler;
+import org.wso2.carbon.identity.configuration.mgt.core.ConfigurationManager;
 import org.wso2.carbon.identity.core.util.IdentityCoreInitializedEvent;
+import org.wso2.carbon.identity.cors.mgt.core.CORSManagementService;
 import org.wso2.carbon.identity.event.handler.AbstractEventHandler;
 import org.wso2.carbon.identity.oauth.OAuthAdminServiceImpl;
+import org.wso2.carbon.identity.oauth.OauthInboundAuthConfigHandler;
+import org.wso2.carbon.identity.oauth.action.execution.PreIssueAccessTokenRequestBuilder;
+import org.wso2.carbon.identity.oauth.action.execution.PreIssueAccessTokenResponseProcessor;
+import org.wso2.carbon.identity.oauth.action.rule.PreIssueAccessTokenRuleEvaluationDataProvider;
 import org.wso2.carbon.identity.oauth.cache.OAuthCache;
 import org.wso2.carbon.identity.oauth.common.OAuthConstants;
 import org.wso2.carbon.identity.oauth.common.token.bindings.TokenBinderInfo;
@@ -43,9 +55,12 @@ import org.wso2.carbon.identity.oauth2.OAuth2ScopeService;
 import org.wso2.carbon.identity.oauth2.OAuth2Service;
 import org.wso2.carbon.identity.oauth2.internal.OAuth2ServiceComponentHolder;
 import org.wso2.carbon.identity.oauth2.token.handlers.response.AccessTokenResponseHandler;
+import org.wso2.carbon.identity.organization.management.organization.user.sharing.OrganizationUserSharingService;
+import org.wso2.carbon.identity.organization.management.service.OrganizationManager;
 import org.wso2.carbon.identity.organization.management.service.OrganizationUserResidentResolverService;
 import org.wso2.carbon.identity.role.mgt.core.RoleManagementService;
-import org.wso2.carbon.registry.core.service.RegistryService;
+import org.wso2.carbon.identity.rule.evaluation.api.provider.RuleEvaluationDataProvider;
+import org.wso2.carbon.idp.mgt.IdpManager;
 import org.wso2.carbon.user.core.listener.UserOperationEventListener;
 import org.wso2.carbon.user.core.service.RealmService;
 
@@ -62,6 +77,7 @@ public class OAuthServiceComponent {
     private ServiceRegistration serviceRegistration = null;
 
     protected void activate(ComponentContext context) {
+
         try {
             // initialize the OAuth Server configuration
             OAuthServerConfiguration oauthServerConfig = OAuthServerConfiguration.getInstance();
@@ -97,6 +113,14 @@ public class OAuthServiceComponent {
                 log.debug("OAuthTokenSessionMapping Event Handler is enabled");
             }
             context.getBundleContext().registerService(OAuthAdminServiceImpl.class.getName(), oauthAdminService, null);
+            OauthInboundAuthConfigHandler authProtocolApplicationService = new OauthInboundAuthConfigHandler();
+            OAuthComponentServiceHolder.getInstance().setOAuthInboundConfigHandler(
+                    authProtocolApplicationService);
+            context.getBundleContext().registerService(ApplicationInboundAuthConfigHandler.class,
+                    authProtocolApplicationService, null);
+
+            registerActionRequestBuilderAndResponseProcessor(context);
+            registerRuleEvaluationDataProvider(context);
             // Note : DO NOT add any activation related code below this point,
             // to make sure the server doesn't start up if any activation failures occur
 
@@ -110,6 +134,22 @@ public class OAuthServiceComponent {
         }
     }
 
+    private void registerActionRequestBuilderAndResponseProcessor(ComponentContext context) {
+
+        context.getBundleContext()
+                .registerService(ActionExecutionRequestBuilder.class, new PreIssueAccessTokenRequestBuilder(), null);
+        context.getBundleContext()
+                .registerService(ActionExecutionResponseProcessor.class, new PreIssueAccessTokenResponseProcessor(),
+                        null);
+    }
+
+    private void registerRuleEvaluationDataProvider(ComponentContext context) {
+
+        context.getBundleContext()
+                .registerService(RuleEvaluationDataProvider.class, new PreIssueAccessTokenRuleEvaluationDataProvider(),
+                        null);
+    }
+
     protected void deactivate(ComponentContext context) {
 
         if (serviceRegistration != null) {
@@ -118,29 +158,6 @@ public class OAuthServiceComponent {
         if (log.isDebugEnabled()) {
             log.debug("Identity OAuth bundle is deactivated");
         }
-    }
-
-    @Reference(
-            name = "registry.service",
-            service = RegistryService.class,
-            cardinality = ReferenceCardinality.MANDATORY,
-            policy = ReferencePolicy.DYNAMIC,
-            unbind = "unsetRegistryService"
-    )
-    protected void setRegistryService(RegistryService registryService) {
-
-        if (log.isDebugEnabled()) {
-            log.debug("RegistryService set in Identity OAuth bundle");
-        }
-        OAuthComponentServiceHolder.getInstance().setRegistryService(registryService);
-    }
-
-    protected void unsetRegistryService(RegistryService registryService) {
-
-        if (log.isDebugEnabled()) {
-            log.debug("RegistryService unset in Identity OAuth bundle");
-        }
-        OAuthComponentServiceHolder.getInstance().setRegistryService(null);
     }
 
     @Reference(
@@ -274,10 +291,10 @@ public class OAuthServiceComponent {
     }
 
     @Reference(name = "token.binding.service",
-               service = TokenBinderInfo.class,
-               cardinality = ReferenceCardinality.MULTIPLE,
-               policy = ReferencePolicy.DYNAMIC,
-               unbind = "unsetTokenBinderInfo")
+            service = TokenBinderInfo.class,
+            cardinality = ReferenceCardinality.MULTIPLE,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unsetTokenBinderInfo")
     protected void setTokenBinderInfo(TokenBinderInfo tokenBinderInfo) {
 
         if (log.isDebugEnabled()) {
@@ -295,10 +312,10 @@ public class OAuthServiceComponent {
     }
 
     @Reference(name = "oauth.application.mgt.listener",
-               service = OAuthApplicationMgtListener.class,
-               cardinality = ReferenceCardinality.MULTIPLE,
-               policy = ReferencePolicy.DYNAMIC,
-               unbind = "unsetOAuthApplicationMgtListener")
+            service = OAuthApplicationMgtListener.class,
+            cardinality = ReferenceCardinality.MULTIPLE,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unsetOAuthApplicationMgtListener")
     protected void setOAuthApplicationMgtListener(OAuthApplicationMgtListener oAuthApplicationMgtListener) {
 
         if (log.isDebugEnabled()) {
@@ -356,6 +373,25 @@ public class OAuthServiceComponent {
     }
 
     @Reference(
+            name = "org.wso2.carbon.identity.role.v2.mgt.core.internal.RoleManagementServiceComponent",
+            service = org.wso2.carbon.identity.role.v2.mgt.core.RoleManagementService.class,
+            cardinality = ReferenceCardinality.MANDATORY,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unsetRoleV2ManagementService"
+    )
+    private void setRoleV2ManagementService(
+            org.wso2.carbon.identity.role.v2.mgt.core.RoleManagementService roleV2ManagementService) {
+
+        OAuthComponentServiceHolder.getInstance().setRoleV2ManagementService(roleV2ManagementService);
+    }
+
+    private void unsetRoleV2ManagementService(
+            org.wso2.carbon.identity.role.v2.mgt.core.RoleManagementService roleV2ManagementService) {
+
+        OAuthComponentServiceHolder.getInstance().setRoleV2ManagementService(null);
+    }
+
+    @Reference(
             name = "organization.user.resident.resolver.service",
             service = OrganizationUserResidentResolverService.class,
             cardinality = ReferenceCardinality.MANDATORY,
@@ -379,5 +415,190 @@ public class OAuthServiceComponent {
             log.debug("Unset organization user resident resolver service.");
         }
         OAuthComponentServiceHolder.getInstance().setOrganizationUserResidentResolverService(null);
+    }
+
+    @Reference(
+            name = "organization.service",
+            service = OrganizationManager.class,
+            cardinality = ReferenceCardinality.MANDATORY,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unsetOrganizationManager"
+    )
+    protected void setOrganizationManager(OrganizationManager organizationManager) {
+
+        OAuthComponentServiceHolder.getInstance().setOrganizationManager(organizationManager);
+        log.debug("Set the organization management service.");
+    }
+
+    protected void unsetOrganizationManager(OrganizationManager organizationManager) {
+
+        OAuthComponentServiceHolder.getInstance().setOrganizationManager(null);
+        log.debug("Unset organization management service.");
+    }
+
+    @Reference(
+            name = "application.mgt.service",
+            service = ApplicationManagementService.class,
+            cardinality = ReferenceCardinality.MANDATORY,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unsetApplicationManagementService"
+    )
+    protected void setApplicationManagementService(ApplicationManagementService applicationManagementService) {
+
+        if (log.isDebugEnabled()) {
+            log.debug("Setting ApplicationManagement Service");
+        }
+        OAuthComponentServiceHolder.getInstance().
+                setApplicationManagementService(applicationManagementService);
+    }
+
+    /**
+     * Unsets ApplicationManagement Service.
+     *
+     * @param applicationManagementService An instance of ApplicationManagementService
+     */
+    protected void unsetApplicationManagementService(ApplicationManagementService applicationManagementService) {
+
+        if (log.isDebugEnabled()) {
+            log.debug("Unsetting ApplicationManagement.");
+        }
+        OAuthComponentServiceHolder.getInstance().setApplicationManagementService(null);
+    }
+
+    @Reference(
+            name = "org.wso2.carbon.identity.application.cors.mgt.service",
+            service = CORSManagementService.class,
+            cardinality = ReferenceCardinality.MANDATORY,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unsetApplicationCORSManagementService"
+    )
+    protected void setApplicationCORSManagementService(CORSManagementService corsManagementService) {
+
+        OAuthComponentServiceHolder.getInstance().setCorsManagementService(corsManagementService);
+    }
+
+    protected void unsetApplicationCORSManagementService(CORSManagementService corsManagementService) {
+
+        OAuthComponentServiceHolder.getInstance().setCorsManagementService(null);
+    }
+
+    @Reference(
+            name = "identity.authorized.api.management.component",
+            service = AuthorizedAPIManagementService.class,
+            cardinality = ReferenceCardinality.MANDATORY,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unsetAuthorizedAPIManagementService"
+    )
+    protected void setAuthorizedAPIManagementService(AuthorizedAPIManagementService authorizedAPIManagementService) {
+
+        if (log.isDebugEnabled()) {
+            log.debug("Setting AuthorizedAPIManagementService Service");
+        }
+        OAuthComponentServiceHolder.getInstance().
+                setAuthorizedAPIManagementService(authorizedAPIManagementService);
+    }
+
+    /**
+     * Unsets AuthorizedAPIManagementService Service.
+     *
+     * @param authorizedAPIManagementService An instance of AuthorizedAPIManagementService
+     */
+    protected void unsetAuthorizedAPIManagementService(AuthorizedAPIManagementService authorizedAPIManagementService) {
+
+        if (log.isDebugEnabled()) {
+            log.debug("Unsetting AuthorizedAPIManagementService.");
+        }
+        OAuthComponentServiceHolder.getInstance().setAuthorizedAPIManagementService(null);
+    }
+
+    @Reference(
+            name = "IdentityProviderManager",
+            service = org.wso2.carbon.idp.mgt.IdpManager.class,
+            cardinality = ReferenceCardinality.MANDATORY,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unsetIdpManager")
+    protected void setIdpManager(IdpManager idpManager) {
+
+        OAuthComponentServiceHolder.getInstance().setIdpManager(idpManager);
+    }
+
+    protected void unsetIdpManager(IdpManager idpManager) {
+
+        OAuthComponentServiceHolder.getInstance().setIdpManager(null);
+    }
+
+    @Reference(
+            name = "organization.user.sharing.service",
+            service = OrganizationUserSharingService.class,
+            cardinality = ReferenceCardinality.MANDATORY,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unsetOrganizationUserSharingService"
+    )
+    protected void setOrganizationUserSharingService(OrganizationUserSharingService organizationUserSharingService) {
+
+        if (log.isDebugEnabled()) {
+            log.debug("Setting the organization user sharing service.");
+        }
+        OAuthComponentServiceHolder.getInstance().setOrganizationUserSharingService(organizationUserSharingService);
+    }
+
+    protected void unsetOrganizationUserSharingService(OrganizationUserSharingService organizationUserSharingService) {
+
+        if (log.isDebugEnabled()) {
+            log.debug("Unset organization user sharing service.");
+        }
+        OAuthComponentServiceHolder.getInstance().setOrganizationUserSharingService(null);
+    }
+
+    /**
+     * Set the ConfigurationManager.
+     *
+     * @param configurationManager The {@code ConfigurationManager} instance.
+     */
+    @Reference(
+            name = "resource.configuration.manager",
+            service = ConfigurationManager.class,
+            cardinality = ReferenceCardinality.MANDATORY,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unregisterConfigurationManager"
+    )
+    protected void registerConfigurationManager(ConfigurationManager configurationManager) {
+
+        if (log.isDebugEnabled()) {
+            log.debug("Registering the ConfigurationManager in JWT Client Authenticator ManagementService.");
+        }
+        OAuthComponentServiceHolder.getInstance().setConfigurationManager(configurationManager);
+    }
+
+    /**
+     * Unset the ConfigurationManager.
+     *
+     * @param configurationManager The {@code ConfigurationManager} instance.
+     */
+    protected void unregisterConfigurationManager(ConfigurationManager configurationManager) {
+
+        if (log.isDebugEnabled()) {
+            log.debug("Unregistering the ConfigurationManager in JWT Client Authenticator ManagementService.");
+        }
+        OAuthComponentServiceHolder.getInstance().setConfigurationManager(null);
+    }
+
+    @Reference(
+            name = "action.execution.service",
+            service = ActionExecutorService.class,
+            cardinality = ReferenceCardinality.MANDATORY,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unregisterActionExecutorService"
+    )
+    protected void registerActionExecutionService(ActionExecutorService actionExecutorService) {
+
+        log.debug("Registering the ActionExecutorService in OAuthServiceComponent.");
+        OAuthComponentServiceHolder.getInstance().setActionExecutorService(actionExecutorService);
+    }
+
+    protected void unregisterActionExecutorService(ActionExecutorService actionExecutorService) {
+
+        log.debug("Unregistering the ActionExecutorService in OAuthServiceComponent.");
+        OAuthComponentServiceHolder.getInstance().setActionExecutorService(null);
     }
 }

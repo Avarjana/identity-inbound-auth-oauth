@@ -17,6 +17,7 @@
  */
 package org.wso2.carbon.identity.oidc.session.backchannellogout;
 
+import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -28,6 +29,7 @@ import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
 import org.wso2.carbon.identity.oauth2.authz.OAuthAuthzReqMessageContext;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2AccessTokenRespDTO;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2AuthorizeRespDTO;
+import org.wso2.carbon.identity.oauth2.model.HttpRequestHeader;
 import org.wso2.carbon.identity.oauth2.token.OAuthTokenReqMessageContext;
 import org.wso2.carbon.identity.oidc.session.OIDCSessionConstants;
 import org.wso2.carbon.identity.oidc.session.OIDCSessionState;
@@ -39,13 +41,14 @@ import java.util.Map;
 import java.util.UUID;
 
 import javax.servlet.http.Cookie;
+import javax.ws.rs.core.HttpHeaders;
 
 /**
  * This class is used to insert sid claim into ID token.
  */
 public class ClaimProviderImpl implements ClaimProvider {
 
-    private static final Log log = LogFactory.getLog(ClaimProviderImpl.class);
+    private static final Log LOG = LogFactory.getLog(ClaimProviderImpl.class);
 
     @Override
     public Map<String, Object> getAdditionalClaims(OAuthAuthzReqMessageContext oAuthAuthzReqMessageContext,
@@ -58,15 +61,11 @@ public class ClaimProviderImpl implements ClaimProvider {
         if (previousSession == null) {
             // If there is no previous browser session, generate new sid value.
             claimValue = UUID.randomUUID().toString();
-            if (log.isDebugEnabled()) {
-                log.debug("sid claim is generated for auth request. ");
-            }
+            LOG.debug("sid claim is generated for auth request.");
         } else {
             // Previous browser session exists, get sid claim from OIDCSessionState.
             claimValue = previousSession.getSidClaim();
-            if (log.isDebugEnabled()) {
-                log.debug("sid claim is found in the session state");
-            }
+            LOG.debug("sid claim is found in the session state.");
         }
         additionalClaims.put(OAuthConstants.OIDCClaims.SESSION_ID_CLAIM, claimValue);
         oAuth2AuthorizeRespDTO.setOidcSessionId(claimValue);
@@ -87,21 +86,26 @@ public class ClaimProviderImpl implements ClaimProvider {
         Map<String, Object> additionalClaims = new HashMap<>();
         String claimValue = null;
         String accessCode = oAuthTokenReqMessageContext.getOauth2AccessTokenReqDTO().getAuthorizationCode();
-        if (StringUtils.isBlank(accessCode)) {
-            if (log.isDebugEnabled()) {
-                log.debug("AccessCode is null. Possibly a back end grant");
+
+        if (StringUtils.isNotBlank(accessCode)) {
+            AuthorizationGrantCacheEntry authzGrantCacheEntry =
+                    getAuthorizationGrantCacheEntryFromCode(accessCode);
+            if (authzGrantCacheEntry != null) {
+                claimValue = authzGrantCacheEntry.getOidcSessionId();
             }
+        } else if (OAuthConstants.GrantTypes.REFRESH_TOKEN.equalsIgnoreCase(
+                oAuthTokenReqMessageContext.getOauth2AccessTokenReqDTO().getGrantType())) {
+            OIDCSessionState previousSession = getSessionState(oAuthTokenReqMessageContext);
+            if (previousSession != null) {
+                claimValue = previousSession.getSidClaim();
+            }
+        } else {
+            LOG.debug("AccessCode is null. Possibly a back end grant");
             return additionalClaims;
         }
-        AuthorizationGrantCacheEntry authzGrantCacheEntry =
-                getAuthorizationGrantCacheEntryFromCode(accessCode);
-        if (authzGrantCacheEntry != null) {
-            claimValue = authzGrantCacheEntry.getOidcSessionId();
-        }
+
         if (claimValue != null) {
-            if (log.isDebugEnabled()) {
-                log.debug("sid claim is found in the session state");
-            }
+            LOG.debug("sid claim is found in the session state");
             additionalClaims.put("sid", claimValue);
         }
         return additionalClaims;
@@ -110,7 +114,7 @@ public class ClaimProviderImpl implements ClaimProvider {
     /**
      * Return previousSessionState using opbs cookie.
      *
-     * @param oAuthAuthzReqMessageContext
+     * @param oAuthAuthzReqMessageContext OAuthAuthzReqMessageContext.
      * @return OIDCSession state
      */
     private OIDCSessionState getSessionState(OAuthAuthzReqMessageContext oAuthAuthzReqMessageContext) {
@@ -119,10 +123,44 @@ public class ClaimProviderImpl implements ClaimProvider {
         if (cookies != null) {
             for (Cookie cookie : cookies) {
                 if (OIDCSessionConstants.OPBS_COOKIE_ID.equals(cookie.getName())) {
-                    OIDCSessionState previousSessionState = OIDCSessionManagementUtil.getSessionManager()
+                    return OIDCSessionManagementUtil.getSessionManager()
                             .getOIDCSessionState(cookie.getValue(), oAuthAuthzReqMessageContext.
                                     getAuthorizationReqDTO().getLoggedInTenantDomain());
-                    return previousSessionState;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Get session state using opbs cookie.
+     *
+     * @param oAuthTokenReqMessageContext OAuth Token Request Message Context.
+     * @return OIDC session state.
+     */
+    private OIDCSessionState getSessionState(OAuthTokenReqMessageContext oAuthTokenReqMessageContext) {
+
+        HttpRequestHeader[] httpRequestHeaders = oAuthTokenReqMessageContext.getOauth2AccessTokenReqDTO()
+                .getHttpRequestHeaders();
+        if (ArrayUtils.isEmpty(httpRequestHeaders)) {
+            return null;
+        }
+        for (HttpRequestHeader httpRequestHeader : httpRequestHeaders) {
+            if (HttpHeaders.COOKIE.equalsIgnoreCase(httpRequestHeader.getName())) {
+                if (ArrayUtils.isEmpty(httpRequestHeader.getValue())) {
+                    return null;
+                }
+                String[] cookies = httpRequestHeader.getValue()[0].split(";");
+                for (String cookie : cookies) {
+                    String[] cookieParts = cookie.split("=");
+                    if (cookieParts.length == 2 && OIDCSessionConstants.OPBS_COOKIE_ID.equals(cookieParts[0].trim())) {
+                        String opbsCookieValue = cookieParts[1];
+                        if (StringUtils.isBlank(opbsCookieValue)) {
+                            return null;
+                        }
+                        return OIDCSessionManagementUtil.getSessionManager().getOIDCSessionState(opbsCookieValue,
+                                oAuthTokenReqMessageContext.getAuthorizedUser().getTenantDomain());
+                    }
                 }
             }
         }

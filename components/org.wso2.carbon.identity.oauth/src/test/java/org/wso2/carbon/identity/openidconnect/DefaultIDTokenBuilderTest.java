@@ -24,8 +24,6 @@ import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import org.json.JSONObject;
 import org.mockito.Mockito;
-import org.powermock.modules.testng.PowerMockTestCase;
-import org.powermock.reflect.internal.WhiteboxImpl;
 import org.testng.Assert;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.DataProvider;
@@ -45,23 +43,30 @@ import org.wso2.carbon.identity.common.testng.WithCarbonHome;
 import org.wso2.carbon.identity.common.testng.WithH2Database;
 import org.wso2.carbon.identity.common.testng.WithKeyStore;
 import org.wso2.carbon.identity.common.testng.WithRealmService;
+import org.wso2.carbon.identity.core.persistence.JDBCPersistenceManager;
 import org.wso2.carbon.identity.core.util.IdentityTenantUtil;
 import org.wso2.carbon.identity.core.util.IdentityUtil;
 import org.wso2.carbon.identity.oauth.cache.AppInfoCache;
 import org.wso2.carbon.identity.oauth.cache.AuthorizationGrantCache;
 import org.wso2.carbon.identity.oauth.cache.AuthorizationGrantCacheEntry;
 import org.wso2.carbon.identity.oauth.cache.AuthorizationGrantCacheKey;
+import org.wso2.carbon.identity.oauth.common.OAuthConstants;
+import org.wso2.carbon.identity.oauth.config.OAuthServerConfiguration;
 import org.wso2.carbon.identity.oauth.dao.OAuthAppDO;
 import org.wso2.carbon.identity.oauth.internal.OAuthComponentServiceHolder;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
 import org.wso2.carbon.identity.oauth2.TestConstants;
+import org.wso2.carbon.identity.oauth2.TestUtil;
 import org.wso2.carbon.identity.oauth2.authz.OAuthAuthzReqMessageContext;
+import org.wso2.carbon.identity.oauth2.dao.AccessTokenDAO;
+import org.wso2.carbon.identity.oauth2.dao.OAuthTokenPersistenceFactory;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2AccessTokenReqDTO;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2AccessTokenRespDTO;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2AuthorizeReqDTO;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2AuthorizeRespDTO;
 import org.wso2.carbon.identity.oauth2.internal.OAuth2ServiceComponentHolder;
 import org.wso2.carbon.identity.oauth2.keyidprovider.DefaultKeyIDProviderImpl;
+import org.wso2.carbon.identity.oauth2.model.AccessTokenDO;
 import org.wso2.carbon.identity.oauth2.test.utils.CommonTestUtils;
 import org.wso2.carbon.identity.oauth2.token.OAuthTokenReqMessageContext;
 import org.wso2.carbon.identity.oauth2.token.handlers.grant.saml.SAML2BearerGrantHandlerTest;
@@ -69,14 +74,14 @@ import org.wso2.carbon.identity.oauth2.util.OAuth2Util;
 import org.wso2.carbon.identity.openidconnect.dao.ScopeClaimMappingDAOImpl;
 import org.wso2.carbon.identity.openidconnect.internal.OpenIDConnectServiceComponentHolder;
 import org.wso2.carbon.identity.openidconnect.model.RequestedClaim;
-import org.wso2.carbon.identity.secret.mgt.core.IdPSecretsProcessor;
-import org.wso2.carbon.identity.secret.mgt.core.SecretsProcessor;
 import org.wso2.carbon.identity.testutil.ReadCertStoreSampleUtil;
-import org.wso2.carbon.idp.mgt.IdentityProviderManager;
 import org.wso2.carbon.idp.mgt.internal.IdpMgtServiceComponentHolder;
+import org.wso2.carbon.idp.mgt.util.IdPSecretsProcessor;
 import org.wso2.carbon.user.core.service.RealmService;
 
 import java.io.InputStream;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.security.Key;
@@ -92,8 +97,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-import static org.mockito.ArgumentMatchers.anyObject;
-import static org.mockito.Matchers.anyString;
+import javax.servlet.http.HttpServletRequestWrapper;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.wso2.carbon.identity.oauth.common.OAuthConstants.OIDCClaims.PHONE_NUMBER_VERIFIED;
@@ -103,16 +112,18 @@ import static org.wso2.carbon.utils.multitenancy.MultitenantConstants.SUPER_TENA
 
 @WithCarbonHome
 @WithAxisConfiguration
-@WithH2Database(files = { "dbScripts/h2_with_application_and_token.sql", "dbScripts/identity.sql" })
+@WithH2Database(files = {"dbScripts/identity.sql", "dbScripts/insert_application_and_token.sql",
+        "dbScripts/insert_consumer_app.sql", "dbScripts/insert_local_idp.sql"})
 @WithRealmService
 @WithKeyStore
-public class DefaultIDTokenBuilderTest extends PowerMockTestCase {
+public class DefaultIDTokenBuilderTest {
 
     public static final String TEST_APPLICATION_NAME = "DefaultIDTokenBuilderTest";
     private static final String AUTHORIZATION_CODE = "AuthorizationCode";
     private static final String AUTHORIZATION_CODE_VALUE = "55fe926f-3b43-3681-aecc-dc3ed7938325";
     private static final String CLIENT_ID = TestConstants.CLIENT_ID;
     private static final String ACCESS_TOKEN = TestConstants.ACCESS_TOKEN;
+    private static final String DUMMY_TOKEN_ENDPOINT = "https://localhost:9443/oauth2/token";
     private DefaultIDTokenBuilder defaultIDTokenBuilder;
     private OAuthTokenReqMessageContext messageContext;
     private OAuth2AccessTokenRespDTO tokenRespDTO;
@@ -141,15 +152,13 @@ public class DefaultIDTokenBuilderTest extends PowerMockTestCase {
         configuration.put("SSOService.SAMLECPEndpoint", "https://localhost:9443/samlecp");
         configuration.put("SSOService.ArtifactResolutionEndpoint", "https://localhost:9443/samlartresolve");
         configuration.put("OAuth.OpenIDConnect.IDTokenIssuerID", "https://localhost:9443/oauth2/token");
-        WhiteboxImpl.setInternalState(IdentityUtil.class, "configuration", configuration);
-        SecretsProcessor<IdentityProvider> identityProviderSecretsProcessor = mock(
-                IdPSecretsProcessor.class);
-        IdpMgtServiceComponentHolder.getInstance().setIdPSecretsProcessorService(identityProviderSecretsProcessor);
-        when(identityProviderSecretsProcessor.encryptAssociatedSecrets(anyObject())).thenAnswer(
+        configuration.put(OAuthConstants.MTLS_HOSTNAME, "https://mtls.localhost:9443/");
+        setPrivateStaticField(IdentityUtil.class, "configuration", configuration);
+        IdPSecretsProcessor identityProviderSecretsProcessor = mock(IdPSecretsProcessor.class);
+        when(identityProviderSecretsProcessor.encryptAssociatedSecrets(any())).thenAnswer(
                 invocation -> invocation.getArguments()[0]);
-        when(identityProviderSecretsProcessor.decryptAssociatedSecrets(anyObject())).thenAnswer(
+        when(identityProviderSecretsProcessor.decryptAssociatedSecrets(any())).thenAnswer(
                 invocation -> invocation.getArguments()[0]);
-        IdentityProviderManager.getInstance().addResidentIdP(idp, SUPER_TENANT_DOMAIN_NAME);
         defaultIDTokenBuilder =  new DefaultIDTokenBuilder();
 
         Map<ClaimMapping, String> userAttributes = new HashMap<>();
@@ -159,6 +168,20 @@ public class DefaultIDTokenBuilderTest extends PowerMockTestCase {
                 .put(SAML2BearerGrantHandlerTest.buildClaimMapping(PHONE_NUMBER_VERIFIED), "phone");
         LinkedHashSet acrValuesHashSet = new LinkedHashSet<>();
         acrValuesHashSet.add(new Object());
+
+        OAuthServerConfiguration.getInstance().populateOAuthTokenIssuerMap();
+
+        AccessTokenDO accessTokenDO = new AccessTokenDO();
+        accessTokenDO.setConsumerKey(CLIENT_ID);
+        accessTokenDO.setAuthzUser(user);
+        accessTokenDO.setScope(new String[]{"openid"});
+        accessTokenDO.setAccessToken(ACCESS_TOKEN);
+
+        AccessTokenDAO accessTokenDAO = mock(AccessTokenDAO.class);
+        setPrivateField(OAuthTokenPersistenceFactory.getInstance(), "tokenDAO", accessTokenDAO);
+        when(accessTokenDAO.getAccessToken(eq(AUTHORIZATION_CODE_VALUE), anyBoolean())).thenReturn(null);
+        when(accessTokenDAO.getAccessToken(eq(ACCESS_TOKEN), anyBoolean())).thenReturn(accessTokenDO);
+
         AuthorizationGrantCacheEntry authorizationGrantCacheEntry = new AuthorizationGrantCacheEntry(userAttributes);
         authorizationGrantCacheEntry.setSubjectClaim(messageContext.getAuthorizedUser().getUserName());
         authorizationGrantCacheEntry.setNonceValue("nonce");
@@ -250,8 +273,8 @@ public class DefaultIDTokenBuilderTest extends PowerMockTestCase {
         ClaimProvider claimProvider = new OpenIDConnectSystemClaimImpl();
         List claimProviders = new ArrayList();
         claimProviders.add(claimProvider);
-        WhiteboxImpl.setInternalState(OpenIDConnectServiceComponentHolder.getInstance(),
-                "claimProviders", claimProviders);
+        setPrivateField(OpenIDConnectServiceComponentHolder.getInstance(), "claimProviders", claimProviders);
+        invokePrivateMethod(JDBCPersistenceManager.getInstance(), "initDataSource");
     }
 
     @Test
@@ -263,13 +286,14 @@ public class DefaultIDTokenBuilderTest extends PowerMockTestCase {
         AuthenticatedUser user = getDefaultAuthenticatedUserFederatedUser();
         OAuthTokenReqMessageContext messageContext = getTokenReqMessageContextForUser(user, clientId);
 
+        OAuthAppDO entry = getOAuthAppDO(CLIENT_ID);
+        AppInfoCache.getInstance().addToCache(clientId, entry);
+
         mockRealmService();
         String idToken = defaultIDTokenBuilder.buildIDToken(messageContext, tokenRespDTO);
         JWTClaimsSet claims = SignedJWT.parse(idToken).getJWTClaimsSet();
-        Assert.assertEquals(claims.getAudience().get(0),
-                clientId);
-        Assert.assertEquals(claims.getIssuer(),
-                "https://localhost:9443/oauth2/token");
+        Assert.assertEquals(claims.getAudience().get(0), clientId);
+        Assert.assertEquals(claims.getIssuer(), "https://localhost:9443/oauth2/token");
         Assert.assertNotNull(claims.getJWTID());
         Assert.assertEquals(claims.getSubject(), "user1");
         Assert.assertEquals(claims.getClaim("isk"), "idp");
@@ -290,6 +314,9 @@ public class DefaultIDTokenBuilderTest extends PowerMockTestCase {
         AuthenticatedUser user = getDefaultAuthenticatedUserFederatedUser();
         OAuthAuthzReqMessageContext oAuthAuthzReqMessageContext = getOAuthAuthzReqMessageContextForUser(user, clientId);
         oAuth2AuthorizeRespDTO.setAccessToken("2sa9a678f890877856y66e75f605d456");
+
+        OAuthAppDO entry = getOAuthAppDO(CLIENT_ID);
+        AppInfoCache.getInstance().addToCache(clientId, entry);
 
         mockRealmService();
         String idToken = defaultIDTokenBuilder.buildIDToken(oAuthAuthzReqMessageContext, oAuth2AuthorizeRespDTO);
@@ -317,7 +344,7 @@ public class DefaultIDTokenBuilderTest extends PowerMockTestCase {
     public void testBuildEncryptedIDTokenForSupportedAlgorithm(String algorithm) throws Exception {
 
         mockRealmService();
-        OAuthAppDO entry = getOAuthAppDO(algorithm);
+        OAuthAppDO entry = getOAuthAppDO(algorithm, CLIENT_ID);
         AppInfoCache.getInstance().addToCache(CLIENT_ID, entry);
 
         String idToken = defaultIDTokenBuilder.buildIDToken(messageContext, tokenRespDTO);
@@ -332,7 +359,7 @@ public class DefaultIDTokenBuilderTest extends PowerMockTestCase {
         Assert.assertEquals(claims.getClaim("nonce"), "nonce");
         Assert.assertNotNull(claims.getClaim("nbf"));
         long expirationTime = ((Date) claims.getClaim("exp")).getTime();
-        Assert.assertTrue(expirationTime < (new Date()).getTime());
+        Assert.assertTrue(expirationTime > (new Date()).getTime());
         long issueTime = ((Date) claims.getClaim("iat")).getTime();
         Assert.assertTrue(issueTime <= (new Date()).getTime());
     }
@@ -345,7 +372,7 @@ public class DefaultIDTokenBuilderTest extends PowerMockTestCase {
         OAuth2AuthorizeRespDTO oAuth2AuthorizeRespDTO = new OAuth2AuthorizeRespDTO();
         oAuth2AuthorizeRespDTO.setAccessToken(ACCESS_TOKEN);
 
-        OAuthAppDO entry = getOAuthAppDO(algorithm);
+        OAuthAppDO entry = getOAuthAppDO(algorithm, CLIENT_ID);
         AppInfoCache.getInstance().addToCache(CLIENT_ID, entry);
 
         mockRealmService();
@@ -358,7 +385,7 @@ public class DefaultIDTokenBuilderTest extends PowerMockTestCase {
         Assert.assertEquals(claims.getSubject(),  "user1");
         Assert.assertEquals(claims.getClaim("isk"), "wso2.is.com");
         long expirationTime = ((Date) claims.getClaim("exp")).getTime();
-        Assert.assertTrue(expirationTime < (new Date()).getTime());
+        Assert.assertTrue(expirationTime > (new Date()).getTime());
         long issueTime = ((Date) claims.getClaim("iat")).getTime();
         Assert.assertTrue(issueTime <= (new Date()).getTime());
     }
@@ -375,7 +402,7 @@ public class DefaultIDTokenBuilderTest extends PowerMockTestCase {
     public void testBuildEncryptedIDTokenForUnSupportedAlgorithm(String algorithm) throws Exception {
 
         mockRealmService();
-        OAuthAppDO entry = getOAuthAppDO(algorithm);
+        OAuthAppDO entry = getOAuthAppDO(algorithm, CLIENT_ID);
         AppInfoCache.getInstance().addToCache(CLIENT_ID, entry);
 
         try {
@@ -419,19 +446,27 @@ public class DefaultIDTokenBuilderTest extends PowerMockTestCase {
         }
     }
 
-    private OAuthAppDO getOAuthAppDO(String algorithm) throws Exception {
+    private OAuthAppDO getOAuthAppDO(String clientId) throws Exception {
 
         OAuthAppDO entry = new OAuthAppDO();
-        entry.setOauthConsumerKey(CLIENT_ID);
+        entry.setOauthConsumerKey(clientId);
         entry.setOauthConsumerSecret("87n9a540f544777860e75f605d435");
         entry.setApplicationName("myApp");
         entry.setCallbackUrl(TestConstants.CALLBACK);
         entry.setOauthVersion("OAuth-2.0");
         entry.setState("ACTIVE");
-        entry.setUserAccessTokenExpiryTime(3600000);
-        entry.setApplicationAccessTokenExpiryTime(3600000);
-        entry.setRefreshTokenExpiryTime(84600000);
+        entry.setUserAccessTokenExpiryTime(3600);
+        entry.setIdTokenExpiryTime(3600);
+        entry.setApplicationAccessTokenExpiryTime(3600);
+        entry.setRefreshTokenExpiryTime(84600);
         entry.setAppOwner(user);
+        entry.setIdTokenEncryptionEnabled(false);
+        return entry;
+    }
+
+    private OAuthAppDO getOAuthAppDO(String algorithm, String clientId) throws Exception {
+
+        OAuthAppDO entry = getOAuthAppDO(clientId);
         entry.setIdTokenEncryptionEnabled(true);
         entry.setIdTokenEncryptionAlgorithm(algorithm);
         entry.setIdTokenEncryptionMethod("A128GCM");
@@ -481,6 +516,9 @@ public class DefaultIDTokenBuilderTest extends PowerMockTestCase {
         accessTokenReqDTO.setTenantDomain(SUPER_TENANT_DOMAIN_NAME);
         accessTokenReqDTO.setClientId(clientId);
         accessTokenReqDTO.setCallbackURI(TestConstants.CALLBACK);
+        HttpServletRequestWrapper httpServletRequestWrapper = mock(HttpServletRequestWrapper.class);
+        when(httpServletRequestWrapper.getRequestURL()).thenReturn(new StringBuffer(DUMMY_TOKEN_ENDPOINT));
+        accessTokenReqDTO.setHttpServletRequestWrapper(httpServletRequestWrapper);
 
         OAuthTokenReqMessageContext requestMsgCtx = new OAuthTokenReqMessageContext(accessTokenReqDTO);
         requestMsgCtx.setAuthorizedUser(user);
@@ -511,6 +549,7 @@ public class DefaultIDTokenBuilderTest extends PowerMockTestCase {
                 .setUserRealm(realmService.getTenantUserRealm(SUPER_TENANT_ID));
         IdpMgtServiceComponentHolder.getInstance().setRealmService(realmService);
         OAuthComponentServiceHolder.getInstance().setRealmService(realmService);
+        TestUtil.mockRealmInIdentityTenantUtil(TestConstants.TENANT_ID, TestConstants.TENANT_DOMAIN);
     }
 
     private String getEssentialClaims() {
@@ -524,4 +563,25 @@ public class DefaultIDTokenBuilderTest extends PowerMockTestCase {
         return essentialClaims.toString();
     }
 
+    private void setPrivateField(Object object, String fieldName, Object value) throws Exception {
+
+        Field field = object.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(object, value);
+    }
+
+    private void setPrivateStaticField(Class<?> clazz, String fieldName, Object newValue)
+            throws NoSuchFieldException, IllegalAccessException {
+
+        Field field = clazz.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(null, newValue);
+    }
+
+    private Object invokePrivateMethod(Object object, String methodName) throws Exception {
+
+        Method method = object.getClass().getDeclaredMethod(methodName);
+        method.setAccessible(true);
+        return method.invoke(object);
+    }
 }

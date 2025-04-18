@@ -1,11 +1,17 @@
 package org.wso2.carbon.identity.oauth2.dcr.endpoint.dto;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import com.fasterxml.jackson.annotation.JsonAnyGetter;
+import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.swagger.annotations.ApiModel;
 import io.swagger.annotations.ApiModelProperty;
+import org.json.JSONObject;
 
-import java.util.ArrayList;
-import java.util.List;
 import javax.validation.constraints.NotNull;
 
 
@@ -17,7 +23,6 @@ public class RegistrationRequestDTO  {
   @NotNull
   private String clientName = null;
   private List<String> grantTypes = new ArrayList<>();
-  private String applicationType = null;
   private String jwksUri = null;
   private String url = null;
   private String clientId = null;
@@ -25,7 +30,6 @@ public class RegistrationRequestDTO  {
   private List<String> contacts = new ArrayList<>();
   private List<String> postLogoutRedirectUris = new ArrayList<>();
   private List<String> requestUris = new ArrayList<>();
-  private List<String> responseTypes = new ArrayList<>();
   private String tokenType = null;
   private String spTemplateName = null;
   private String backchannelLogoutUri = null;
@@ -40,14 +44,31 @@ public class RegistrationRequestDTO  {
   private boolean extPkceMandatory;
   private boolean extPkceSupportPlain;
   private boolean extPublicClient;
-  
+  private String extTokenType = null;
+  private String tokenEndpointAuthMethod = null;
+  private String tokenEndpointAuthSigningAlg = null;
+  private Boolean tokenEndpointAllowReusePvtKeyJwt;
+  private String sectorIdentifierUri = null;
+  private String idTokenSignedResponseAlg = null;
+  private String idTokenEncryptedResponseAlg = null;
+  private String idTokenEncryptedResponseEnc = null;
+  private String requestObjectSigningAlg = null;
+  private String tlsClientAuthSubjectDn = null;
+  private boolean requirePushAuthorizationRequest;
+  private boolean requireSignedRequestObject;
+  private boolean tlsClientCertificateBoundAccessToken;
+  private String subjectType = null;
+  private String requestObjectEncryptionAlgorithm = null;
+  private String requestObjectEncryptionMethod = null;
+  private String softwareStatement = null;
+  private final Map<String, Object> additionalAttributes = new HashMap<>();
+  private String extAllowedAudience;
 
   @ApiModelProperty(required = true)
   @JsonProperty("redirect_uris")
   public List<String> getRedirectUris() {
     return redirectUris;
   }
-
   public void setRedirectUris(List<String> redirectUris) {
     this.redirectUris = redirectUris;
   }
@@ -57,7 +78,6 @@ public class RegistrationRequestDTO  {
   public String getClientName() {
     return clientName;
   }
-
   public void setClientName(String clientName) {
     this.clientName = clientName;
   }
@@ -67,19 +87,8 @@ public class RegistrationRequestDTO  {
   public List<String> getGrantTypes() {
     return grantTypes;
   }
-
   public void setGrantTypes(List<String> grantTypes) {
     this.grantTypes = grantTypes;
-  }
-
-  @ApiModelProperty
-  @JsonProperty("application_type")
-  public String getApplicationType() {
-    return applicationType;
-  }
-
-  public void setApplicationType(String applicationType) {
-    this.applicationType = applicationType;
   }
 
   @ApiModelProperty
@@ -153,16 +162,6 @@ public class RegistrationRequestDTO  {
   }
 
   @ApiModelProperty
-  @JsonProperty("response_types")
-  public List<String> getResponseTypes() {
-    return responseTypes;
-  }
-
-  public void setResponseTypes(List<String> responseTypes) {
-    this.responseTypes = responseTypes;
-  }
-
-  @ApiModelProperty
   @JsonProperty("token_type_extension")
   public String getTokenType() {
     return tokenType;
@@ -170,6 +169,16 @@ public class RegistrationRequestDTO  {
 
   public void setTokenType(String tokenType) {
     this.tokenType = tokenType;
+  }
+
+  @ApiModelProperty
+  @JsonProperty("ext_token_type")
+  public String getExtTokenType() {
+    return extTokenType;
+  }
+
+  public void setExtTokenType(String tokenType) {
+    this.extTokenType = tokenType;
   }
 
   @ApiModelProperty
@@ -295,6 +304,178 @@ public class RegistrationRequestDTO  {
     this.extPublicClient = extPublicClient;
   }
 
+  @ApiModelProperty(value = "")
+  @JsonProperty("token_endpoint_auth_method")
+  public String getTokenEndpointAuthMethod() {
+    return tokenEndpointAuthMethod;
+  }
+  public void setTokenEndpointAuthMethod(String tokenEndpointAuthMethod) {
+    this.tokenEndpointAuthMethod = tokenEndpointAuthMethod;
+  }
+
+  @ApiModelProperty(value = "")
+  @JsonProperty("token_endpoint_allow_reuse_pvt_key_jwt")
+  public Boolean isTokenEndpointAllowReusePvtKeyJwt() {
+
+      return tokenEndpointAllowReusePvtKeyJwt;
+  }
+
+  public void setTokenEndpointAllowReusePvtKeyJwt(Boolean tokenEndpointAllowReusePvtKeyJwt) {
+
+    this.tokenEndpointAllowReusePvtKeyJwt = tokenEndpointAllowReusePvtKeyJwt;
+  }
+
+
+  @ApiModelProperty(value = "")
+  @JsonProperty("token_endpoint_auth_signing_alg")
+  public String getTokenEndpointAuthSigningAlg() {
+    return tokenEndpointAuthSigningAlg;
+  }
+  public void setTokenEndpointAuthSigningAlg(String tokenEndpointAuthSigningAlg) {
+    this.tokenEndpointAuthSigningAlg = tokenEndpointAuthSigningAlg;
+  }
+
+  @ApiModelProperty(value = "")
+  @JsonProperty("sector_identifier_uri")
+  public String getSectorIdentifierUri() {
+    return sectorIdentifierUri;
+  }
+  public void setSectorIdentifierUri(String sectorIdentifierUri) {
+    this.sectorIdentifierUri = sectorIdentifierUri;
+  }
+
+  @ApiModelProperty(value = "")
+  @JsonProperty("id_token_signed_response_alg")
+  public String getIdTokenSignedResponseAlg() {
+    return idTokenSignedResponseAlg;
+  }
+  public void setIdTokenSignedResponseAlg(String idTokenSignedResponseAlg) {
+    this.idTokenSignedResponseAlg = idTokenSignedResponseAlg;
+  }
+
+  @ApiModelProperty(value = "")
+  @JsonProperty("id_token_encrypted_response_alg")
+  public String getIdTokenEncryptedResponseAlg() {
+    return idTokenEncryptedResponseAlg;
+  }
+  public void setIdTokenEncryptedResponseAlg(String idTokenEncryptedResponseAlg) {
+    this.idTokenEncryptedResponseAlg = idTokenEncryptedResponseAlg;
+  }
+
+  @ApiModelProperty(value = "")
+  @JsonProperty("id_token_encrypted_response_enc")
+  public String getIdTokenEncryptedResponseEnc() {
+    return idTokenEncryptedResponseEnc;
+  }
+  public void setIdTokenEncryptedResponseEnc(String idTokenEncryptedResponseEnc) {
+    this.idTokenEncryptedResponseEnc = idTokenEncryptedResponseEnc;
+  }
+  @ApiModelProperty(value = "")
+  @JsonProperty("request_object_signing_alg")
+  public String getRequestObjectSigningAlg() {
+    return requestObjectSigningAlg;
+  }
+  public void setRequestObjectSigningAlg(String requestObjectSigningAlg) {
+    this.requestObjectSigningAlg = requestObjectSigningAlg;
+  }
+
+  @ApiModelProperty(value = "")
+  @JsonProperty("tls_client_auth_subject_dn")
+  public String getTlsClientAuthSubjectDn() {
+    return tlsClientAuthSubjectDn;
+  }
+  public void setTlsClientAuthSubjectDn(String tlsClientAuthSubjectDn) {
+    this.tlsClientAuthSubjectDn = tlsClientAuthSubjectDn;
+  }
+
+  @ApiModelProperty(value = "")
+  @JsonProperty("require_pushed_authorization_requests")
+  public boolean isRequirePushAuthorizationRequest() {
+    return requirePushAuthorizationRequest;
+  }
+
+  public void setRequirePushAuthorizationRequest(boolean requirePushAuthorizationRequest) {
+    this.requirePushAuthorizationRequest = requirePushAuthorizationRequest;
+  }
+
+  @ApiModelProperty(value = "")
+  @JsonProperty("require_signed_request_object")
+  public boolean isRequireSignedRequestObject() {
+    return requireSignedRequestObject;
+  }
+
+  public void setRequireSignedRequestObject(boolean requireSignedRequestObject) {
+    this.requireSignedRequestObject = requireSignedRequestObject;
+  }
+
+  @ApiModelProperty(value = "")
+  @JsonProperty("tls_client_certificate_bound_access_tokens")
+  public boolean isTlsClientCertificateBoundAccessToken() {
+    return tlsClientCertificateBoundAccessToken;
+  }
+
+  public void setTlsClientCertificateBoundAccessToken(boolean tlsClientCertificateBoundAccessToken) {
+    this.tlsClientCertificateBoundAccessToken = tlsClientCertificateBoundAccessToken;
+  }
+
+  @ApiModelProperty(value = "")
+  @JsonProperty("subject_type")
+  public String getSubjectType() {
+    return subjectType;
+  }
+
+  public void setSubjectType(String subjectType) {
+    this.subjectType = subjectType;
+  }
+
+  @ApiModelProperty(value = "")
+  @JsonProperty("request_object_encryption_alg")
+  public String getRequestObjectEncryptionAlgorithm() {
+    return requestObjectEncryptionAlgorithm;
+  }
+
+  public void setRequestObjectEncryptionAlgorithm(String requestObjectEncryptionAlgorithm) {
+    this.requestObjectEncryptionAlgorithm = requestObjectEncryptionAlgorithm;
+  }
+
+  @ApiModelProperty(value = "")
+  @JsonProperty("request_object_encryption_enc")
+  public String getRequestObjectEncryptionMethod() {
+    return requestObjectEncryptionMethod;
+  }
+
+  public void setRequestObjectEncryptionMethod(String requestObjectEncryptionMethod) {
+    this.requestObjectEncryptionMethod = requestObjectEncryptionMethod;
+  }
+
+  @ApiModelProperty(value = "")
+  @JsonProperty("software_statement")
+  public String getSoftwareStatement() {
+    return softwareStatement;
+  }
+
+  public void setSoftwareStatement(String softwareStatement) {
+    this.softwareStatement = softwareStatement;
+  }
+
+  @JsonAnySetter
+  public void setAdditionalAttributes(String key, Object value) {
+    additionalAttributes.put(key, value);
+  }
+
+  public Map<String, Object> getAdditionalAttributes() {
+    return additionalAttributes;
+  }
+
+  @ApiModelProperty(value = "")
+  @JsonProperty("ext_allowed_audience")
+  public String getExtAllowedAudience() {
+    return extAllowedAudience;
+  }
+  public void setExtAllowedAudience(String extAllowedAudience) {
+    this.extAllowedAudience = extAllowedAudience;
+  }
+
   @Override
   public String toString()  {
     StringBuilder sb = new StringBuilder();
@@ -303,7 +484,6 @@ public class RegistrationRequestDTO  {
     sb.append("  redirect_uris: ").append(redirectUris).append("\n");
     sb.append("  client_name: ").append(clientName).append("\n");
     sb.append("  grant_types: ").append(grantTypes).append("\n");
-    sb.append("  application_type: ").append(applicationType).append("\n");
     sb.append("  jwks_uri: ").append(jwksUri).append("\n");
     sb.append("  url: ").append(url).append("\n");
     sb.append("  ext_param_client_id: ").append(clientId).append("\n");
@@ -311,7 +491,6 @@ public class RegistrationRequestDTO  {
     sb.append("  contacts: ").append(contacts).append("\n");
     sb.append("  post_logout_redirect_uris: ").append(postLogoutRedirectUris).append("\n");
     sb.append("  request_uris: ").append(requestUris).append("\n");
-    sb.append("  response_types: ").append(responseTypes).append("\n");
     sb.append("  token_type_extension: ").append(tokenType).append("\n");
     sb.append("  ext_param_sp_template: ").append(spTemplateName).append("\n");
     sb.append("  backchannel_logout_uri: ").append(backchannelLogoutUri).append("\n");
@@ -326,6 +505,23 @@ public class RegistrationRequestDTO  {
     sb.append("  ext_pkce_mandatory: ").append(extPkceMandatory).append("\n");
     sb.append("  ext_pkce_support_plain: ").append(extPkceSupportPlain).append("\n");
     sb.append("  ext_public_client: ").append(extPublicClient).append("\n");
+    sb.append("  token_endpoint_auth_method: ").append(tokenEndpointAuthMethod).append("\n");
+    sb.append("  token_endpoint_auth_signing_alg: ").append(tokenEndpointAuthSigningAlg).append("\n");
+    sb.append("  sector_identifier_uri: ").append(sectorIdentifierUri).append("\n");
+    sb.append("  id_token_signed_response_alg: ").append(idTokenSignedResponseAlg).append("\n");
+    sb.append("  id_token_encrypted_response_alg: ").append(idTokenEncryptedResponseAlg).append("\n");
+    sb.append("  id_token_encrypted_response_enc: ").append(idTokenEncryptedResponseEnc).append("\n");
+    sb.append("  request_object_signing_alg: ").append(requestObjectSigningAlg).append("\n");
+    sb.append("  tls_client_auth_subject_dn: ").append(tlsClientAuthSubjectDn).append("\n");
+    sb.append(" require_signed_request_object: ").append(requireSignedRequestObject).append("\n");
+    sb.append(" require_pushed_authorization_requests: ").append(requirePushAuthorizationRequest).append("\n");
+    sb.append(" tls_client_certificate_bound_access_tokens: ")
+            .append(tlsClientCertificateBoundAccessToken).append("\n");
+    sb.append(" subject_type: ").append(subjectType).append("\n");
+    sb.append(" request_object_encryption_alg: ").append(requestObjectEncryptionAlgorithm).append("\n");
+    sb.append(" request_object_encryption_enc").append(requestObjectEncryptionMethod).append("\n");
+    sb.append("  additionalAttributes: ").append(additionalAttributes).append("\n");
+    sb.append("  extAllowedAudience: ").append(extAllowedAudience).append("\n");
     sb.append("}\n");
     return sb.toString();
   }

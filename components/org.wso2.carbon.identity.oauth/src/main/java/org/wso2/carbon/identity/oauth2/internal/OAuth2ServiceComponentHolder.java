@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2023, WSO2 LLC. (http://www.wso2.com).
+ * Copyright (c) 2014-2024, WSO2 LLC. (http://www.wso2.com).
  *
  * WSO2 LLC. licenses this file to you under the Apache License,
  * Version 2.0 (the "License"); you may not use this file except
@@ -18,20 +18,39 @@
 
 package org.wso2.carbon.identity.oauth2.internal;
 
+import org.wso2.carbon.identity.api.resource.mgt.APIResourceManager;
+import org.wso2.carbon.identity.api.resource.mgt.AuthorizationDetailsTypeManager;
 import org.wso2.carbon.identity.application.authentication.framework.AuthenticationDataPublisher;
 import org.wso2.carbon.identity.application.authentication.framework.AuthenticationMethodNameTranslator;
 import org.wso2.carbon.identity.application.authentication.framework.UserSessionManagementService;
 import org.wso2.carbon.identity.application.mgt.ApplicationManagementService;
+import org.wso2.carbon.identity.application.mgt.AuthorizedAPIManagementService;
+import org.wso2.carbon.identity.claim.metadata.mgt.ClaimMetadataManagementService;
+import org.wso2.carbon.identity.configuration.mgt.core.ConfigurationManager;
 import org.wso2.carbon.identity.consent.server.configs.mgt.services.ConsentServerConfigsManagementService;
 import org.wso2.carbon.identity.core.SAMLSSOServiceProviderManager;
 import org.wso2.carbon.identity.core.handler.HandlerComparator;
 import org.wso2.carbon.identity.event.services.IdentityEventService;
+import org.wso2.carbon.identity.handler.event.account.lock.service.AccountLockService;
 import org.wso2.carbon.identity.oauth.OAuthAdminServiceImpl;
 import org.wso2.carbon.identity.oauth.dto.ScopeDTO;
+import org.wso2.carbon.identity.oauth.rar.core.AuthorizationDetailsSchemaValidator;
+import org.wso2.carbon.identity.oauth.tokenprocessor.DefaultOAuth2RevocationProcessor;
+import org.wso2.carbon.identity.oauth.tokenprocessor.DefaultRefreshTokenGrantProcessor;
+import org.wso2.carbon.identity.oauth.tokenprocessor.DefaultTokenProvider;
+import org.wso2.carbon.identity.oauth.tokenprocessor.OAuth2RevocationProcessor;
+import org.wso2.carbon.identity.oauth.tokenprocessor.RefreshTokenGrantProcessor;
+import org.wso2.carbon.identity.oauth.tokenprocessor.TokenProvider;
+import org.wso2.carbon.identity.oauth2.OAuthAuthorizationRequestBuilder;
 import org.wso2.carbon.identity.oauth2.authz.validators.ResponseTypeRequestValidator;
 import org.wso2.carbon.identity.oauth2.bean.Scope;
 import org.wso2.carbon.identity.oauth2.client.authentication.OAuthClientAuthenticator;
+import org.wso2.carbon.identity.oauth2.impersonation.services.ImpersonationMgtService;
+import org.wso2.carbon.identity.oauth2.impersonation.validators.ImpersonationValidator;
 import org.wso2.carbon.identity.oauth2.keyidprovider.KeyIDProvider;
+import org.wso2.carbon.identity.oauth2.rar.AuthorizationDetailsService;
+import org.wso2.carbon.identity.oauth2.rar.validator.AuthorizationDetailsValidator;
+import org.wso2.carbon.identity.oauth2.rar.validator.DefaultAuthorizationDetailsValidator;
 import org.wso2.carbon.identity.oauth2.responsemode.provider.ResponseModeProvider;
 import org.wso2.carbon.identity.oauth2.token.bindings.TokenBinder;
 import org.wso2.carbon.identity.oauth2.token.handlers.claims.JWTAccessTokenClaimProvider;
@@ -41,6 +60,7 @@ import org.wso2.carbon.identity.organization.management.role.management.service.
 import org.wso2.carbon.identity.organization.management.service.OrganizationManagementInitialize;
 import org.wso2.carbon.identity.organization.management.service.OrganizationManager;
 import org.wso2.carbon.identity.organization.management.service.OrganizationUserResidentResolverService;
+import org.wso2.carbon.identity.role.v2.mgt.core.RoleManagementService;
 import org.wso2.carbon.idp.mgt.IdpManager;
 import org.wso2.carbon.registry.core.service.RegistryService;
 import org.wso2.carbon.user.core.service.RealmService;
@@ -48,10 +68,12 @@ import org.wso2.carbon.utils.ConfigurationContextService;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * OAuth2 Service component data holder
@@ -92,7 +114,28 @@ public class OAuth2ServiceComponentHolder {
     private static boolean restrictUnassignedScopes;
     private static ConfigurationContextService configurationContextService;
     private List<JWTAccessTokenClaimProvider> jwtAccessTokenClaimProviders = new ArrayList<>();
+    private final List<OAuthAuthorizationRequestBuilder> oAuthAuthorizationRequestBuilders = new ArrayList<>();
     private boolean isOrganizationManagementEnabled = false;
+    private RefreshTokenGrantProcessor refreshTokenGrantProcessor;
+    private OAuth2RevocationProcessor revocationProcessor;
+    private TokenProvider tokenProvider;
+    private AuthorizedAPIManagementService authorizedAPIManagementService;
+    private APIResourceManager apiResourceManager;
+    private RoleManagementService roleManagementServiceV2;
+    private Map<String, Set<String>> legacyScopesToNewScopesMap = new HashMap<>();
+    private Map<String, Set<String>> legacyMultipleScopesToNewScopesMap = new HashMap<>();
+
+    private ImpersonationMgtService impersonationMgtService;
+
+    private List<ImpersonationValidator> impersonationValidators = new ArrayList<>();
+    private ConfigurationManager configurationManager;
+    private static AccountLockService accountLockService;
+    private ClaimMetadataManagementService claimMetadataManagementService;
+
+    private AuthorizationDetailsService authorizationDetailsService;
+    private AuthorizationDetailsValidator authorizationDetailsValidator;
+    private AuthorizationDetailsTypeManager authorizationDetailsTypeManager;
+    private AuthorizationDetailsSchemaValidator authorizationDetailsSchemaValidator;
 
     private OAuth2ServiceComponentHolder() {
 
@@ -475,6 +518,52 @@ public class OAuth2ServiceComponentHolder {
         OAuth2ServiceComponentHolder.consentServerConfigsManagementService = consentServerConfigsManagementService;
     }
 
+    /**
+     * Get Refresh Token Grant Processor.
+     *
+     * @return RefreshTokenGrantProcessor  Refresh Token Grant Processor.
+     */
+    public RefreshTokenGrantProcessor getRefreshTokenGrantProcessor() {
+
+        if (refreshTokenGrantProcessor == null) {
+            refreshTokenGrantProcessor = new DefaultRefreshTokenGrantProcessor();
+        }
+        return refreshTokenGrantProcessor;
+    }
+
+    /**
+     * Set Refresh Token Grant Processor.
+     *
+     * @param refreshTokenGrantProcessor Refresh Token Grant Processor.
+     */
+    public void setRefreshTokenGrantProcessor(RefreshTokenGrantProcessor refreshTokenGrantProcessor) {
+
+        this.refreshTokenGrantProcessor = refreshTokenGrantProcessor;
+    }
+
+    /**
+     * Get Revocation Processor.
+     *
+     * @return Revocation Processor.
+     */
+    public OAuth2RevocationProcessor getRevocationProcessor() {
+
+        if (revocationProcessor == null) {
+            revocationProcessor = new DefaultOAuth2RevocationProcessor();
+        }
+        return revocationProcessor;
+    }
+
+    /**
+     * Set Revocation Processor.
+     *
+     * @param revocationProcessor Revocation Processor.
+     */
+    public void setRevocationProcessor(OAuth2RevocationProcessor revocationProcessor) {
+
+        this.revocationProcessor = revocationProcessor;
+    }
+
     public static boolean isRestrictUnassignedScopes() {
 
         return restrictUnassignedScopes;
@@ -532,7 +621,7 @@ public class OAuth2ServiceComponentHolder {
 
     public void removeJWTAccessTokenClaimProvider(JWTAccessTokenClaimProvider accessTokenClaimProvider) {
 
-        jwtAccessTokenClaimProviders.add(accessTokenClaimProvider);
+        jwtAccessTokenClaimProviders.remove(accessTokenClaimProvider);
     }
 
     /**
@@ -627,5 +716,316 @@ public class OAuth2ServiceComponentHolder {
             return getDefaultResponseModeProvider();
         }
         return responseModeProvider;
+    }
+
+    /**
+     * Get the list of oauth authorization request builder implementations available.
+     *
+     * @return List<OAuthAuthorizationRequestBuilder> returns a list ot request builders.
+     */
+    public List<OAuthAuthorizationRequestBuilder> getAuthorizationRequestBuilders() {
+
+        return oAuthAuthorizationRequestBuilders;
+    }
+
+    /**
+     * Add request builder implementation.
+     *
+     * @param oAuthAuthorizationRequestBuilder Request builder implementation.
+     */
+    public void addAuthorizationRequestBuilder(OAuthAuthorizationRequestBuilder oAuthAuthorizationRequestBuilder) {
+
+        oAuthAuthorizationRequestBuilders.add(oAuthAuthorizationRequestBuilder);
+    }
+
+    /**
+     * Remove request builder implementation.
+     *
+     * @param oAuthAuthorizationRequestBuilder Request builder implementation.
+     */
+    public void removeAuthorizationRequestBuilder(OAuthAuthorizationRequestBuilder oAuthAuthorizationRequestBuilder) {
+
+        oAuthAuthorizationRequestBuilders.remove(oAuthAuthorizationRequestBuilder);
+    }
+
+    /**
+     * Get token provider.
+     *
+     * @return TokenProvider
+     */
+    public TokenProvider getTokenProvider() {
+
+        if (tokenProvider == null) {
+            tokenProvider = new DefaultTokenProvider();
+        }
+        return tokenProvider;
+    }
+
+    /**
+     * Set token provider.
+     *
+     * @param tokenProvider TokenProvider
+     */
+    public void setTokenProvider(TokenProvider tokenProvider) {
+
+        this.tokenProvider = tokenProvider;
+    }
+
+    public AuthorizedAPIManagementService getAuthorizedAPIManagementService() {
+
+        return authorizedAPIManagementService;
+    }
+
+    public void setAuthorizedAPIManagementService(AuthorizedAPIManagementService authorizedAPIManagementService) {
+
+        this.authorizedAPIManagementService = authorizedAPIManagementService;
+    }
+
+    /**
+     * Get APIResourceManager osgi service.
+     *
+     * @return APIResourceManager.
+     */
+    public APIResourceManager getApiResourceManager() {
+        return apiResourceManager;
+    }
+    /**
+     * Set APIResourceManager osgi service.
+     *
+     * @param apiResourceManager APIResourceManager.
+     */
+    public void setApiResourceManager(APIResourceManager apiResourceManager) {
+
+        this.apiResourceManager = apiResourceManager;
+    }
+
+    /**
+     * Get {@link RoleManagementService}.
+     *
+     * @return Instance of {@link RoleManagementService}.
+     */
+    public RoleManagementService getRoleManagementServiceV2() {
+
+        return roleManagementServiceV2;
+    }
+
+    /**
+     * Set {@link RoleManagementService}.
+     *
+     * @param roleManagementServiceV2 Instance of {@link RoleManagementService}.
+     */
+    public void setRoleManagementServiceV2(RoleManagementService roleManagementServiceV2) {
+
+        this.roleManagementServiceV2 = roleManagementServiceV2;
+    }
+
+    /**
+     * Get the map of legacy scopes to new scopes.
+     *
+     * @return Map of legacy scopes to new scopes.
+     */
+    public Map<String, Set<String>> getLegacyScopesToNewScopesMap() {
+
+        return legacyScopesToNewScopesMap;
+    }
+
+    /**
+     * Set the map of legacy scopes to new scopes.
+     *
+     * @param legacyScopesToNewScopesMap Map of legacy scopes to new scopes.
+     */
+    public void setLegacyScopesToNewScopesMap(Map<String, Set<String>> legacyScopesToNewScopesMap) {
+
+        this.legacyScopesToNewScopesMap = legacyScopesToNewScopesMap;
+    }
+
+    /**
+     * Get the map of legacy multiple scopes to new scopes.
+     *
+     * @return Map of legacy multiple scopes to new scopes.
+     */
+    public Map<String, Set<String>> getLegacyMultipleScopesToNewScopesMap() {
+
+        return legacyMultipleScopesToNewScopesMap;
+    }
+
+    /**
+     * Set the map of legacy multiple scopes to new scopes.
+     *
+     * @param legacyMultipleScopesToNewScopesMap Map of legacy multiple scopes to new scopes.
+     */
+    public void setLegacyMultipleScopesToNewScopesMap(Map<String, Set<String>> legacyMultipleScopesToNewScopesMap) {
+
+        this.legacyMultipleScopesToNewScopesMap = legacyMultipleScopesToNewScopesMap;
+    }
+
+
+    public ImpersonationMgtService getImpersonationMgtService() {
+
+        return impersonationMgtService;
+    }
+
+    public void setImpersonationMgtService(ImpersonationMgtService impersonationMgtService) {
+
+        this.impersonationMgtService = impersonationMgtService;
+    }
+
+    public void addImpersonationValidator(ImpersonationValidator impersonationValidator) {
+
+        impersonationValidators.add(impersonationValidator);
+        impersonationValidators.sort(getImpersonationValidatorComparator());
+    }
+
+    public void removeImpersonationValidator(ImpersonationValidator impersonationValidator) {
+
+        impersonationValidators.removeIf(impersonationValidator1 -> impersonationValidator1.getClass().getName()
+                .equals(impersonationValidator.getClass().getName()));
+    }
+
+    public List<ImpersonationValidator> getImpersonationValidators() {
+
+        return impersonationValidators;
+    }
+
+    private Comparator<ImpersonationValidator> getImpersonationValidatorComparator() {
+
+        // Sort based on priority in descending order, ie. the highest priority comes to the first element of the list.
+        return Comparator.comparingInt(ImpersonationValidator::getPriority).reversed();
+    }
+
+    public ConfigurationManager getConfigurationManager() {
+
+        return configurationManager;
+    }
+
+    public void setConfigurationManager(ConfigurationManager configurationManager) {
+
+        this.configurationManager = configurationManager;
+    }
+
+    /**
+     * Set the account lock service to the OAuth2ServiceComponentHolder.
+     *
+     * @param accountLockService Account lock service instance.
+     */
+    public static void setAccountLockService(AccountLockService accountLockService) {
+
+        OAuth2ServiceComponentHolder.accountLockService = accountLockService;
+    }
+
+    /**
+     * Retrieve the account lock service.
+     *
+     * @return Account lock service instance.
+     */
+    public static AccountLockService getAccountLockService() {
+
+        return OAuth2ServiceComponentHolder.accountLockService;
+    }
+
+    /**
+     * Set the ClaimMetadataManagementService instance.
+     *
+     * @param claimMetadataManagementService ClaimMetadataManagementService instance.
+     */
+    public void setClaimMetadataManagementService(ClaimMetadataManagementService claimMetadataManagementService) {
+
+        this.claimMetadataManagementService = claimMetadataManagementService;
+    }
+
+    /**
+     * Get the ClaimMetadataManagementService instance.
+     *
+     * @return ClaimMetadataManagementService instance.
+     */
+    public ClaimMetadataManagementService getClaimMetadataManagementService() {
+
+        return claimMetadataManagementService;
+    }
+
+    /**
+     * Set an {@link AuthorizationDetailsService} instance.
+     *
+     * @param authorizationDetailsService AuthorizationDetailsService instance.
+     */
+    public void setAuthorizationDetailsService(AuthorizationDetailsService authorizationDetailsService) {
+
+        this.authorizationDetailsService = authorizationDetailsService;
+    }
+
+    /**
+     * Get an {@link AuthorizationDetailsService} instance.
+     *
+     * @return A {@link AuthorizationDetailsService} singleton instance.
+     */
+    public AuthorizationDetailsService getAuthorizationDetailsService() {
+
+        if (this.authorizationDetailsService == null) {
+            this.authorizationDetailsService = new AuthorizationDetailsService();
+        }
+        return this.authorizationDetailsService;
+    }
+
+    /**
+     * Get an {@link AuthorizationDetailsValidator} instance.
+     *
+     * @param authorizationDetailsValidator AuthorizationDetailsValidator instance.
+     */
+    public void setAuthorizationDetailsValidator(AuthorizationDetailsValidator authorizationDetailsValidator) {
+
+        this.authorizationDetailsValidator = authorizationDetailsValidator;
+    }
+
+    /**
+     * Get an {@link AuthorizationDetailsValidator} instance.
+     *
+     * @return A {@link AuthorizationDetailsValidator} singleton instance.
+     */
+    public AuthorizationDetailsValidator getAuthorizationDetailsValidator() {
+
+        if (this.authorizationDetailsValidator == null) {
+            this.authorizationDetailsValidator = new DefaultAuthorizationDetailsValidator();
+        }
+        return this.authorizationDetailsValidator;
+    }
+
+    /**
+     * Get an {@link AuthorizationDetailsTypeManager} instance.
+     *
+     * @return A {@link AuthorizationDetailsTypeManager} singleton instance.
+     */
+    public AuthorizationDetailsTypeManager getAuthorizationDetailsTypeManager() {
+
+        return this.authorizationDetailsTypeManager;
+    }
+
+    /**
+     * set an {@link AuthorizationDetailsTypeManager} instance.
+     *
+     * @param authorizationDetailsTypeManager An {@link AuthorizationDetailsTypeManager} instance.
+     */
+    public void setAuthorizationDetailsTypeManager(AuthorizationDetailsTypeManager authorizationDetailsTypeManager) {
+
+        this.authorizationDetailsTypeManager = authorizationDetailsTypeManager;
+    }
+
+    /**
+     * Get an {@link AuthorizationDetailsSchemaValidator} instance.
+     *
+     * @return A {@link AuthorizationDetailsSchemaValidator} singleton instance.
+     */
+    public AuthorizationDetailsSchemaValidator getAuthorizationDetailsSchemaValidator() {
+
+        return this.authorizationDetailsSchemaValidator;
+    }
+
+    /**
+     * set an {@link AuthorizationDetailsSchemaValidator} instance.
+     *
+     * @param schemaValidator An {@link AuthorizationDetailsSchemaValidator} instance.
+     */
+    public void setAuthorizationDetailsSchemaValidator(AuthorizationDetailsSchemaValidator schemaValidator) {
+
+        this.authorizationDetailsSchemaValidator = schemaValidator;
     }
 }

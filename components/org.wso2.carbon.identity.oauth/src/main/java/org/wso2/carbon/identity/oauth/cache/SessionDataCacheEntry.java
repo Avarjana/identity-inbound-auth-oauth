@@ -19,11 +19,14 @@
 package org.wso2.carbon.identity.oauth.cache;
 
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
+import org.wso2.carbon.identity.application.common.model.ClaimMapping;
 import org.wso2.carbon.identity.oauth2.authz.OAuthAuthzReqMessageContext;
+import org.wso2.carbon.identity.oauth2.model.FederatedTokenDO;
 import org.wso2.carbon.identity.oauth2.model.OAuth2Parameters;
 
 import java.io.Serializable;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -50,6 +53,8 @@ public class SessionDataCacheEntry extends CacheEntry {
     private ConcurrentMap<String, String[]> paramMap = new ConcurrentHashMap<String, String[]>();
 
     private Map<String, Serializable> endpointParams = new HashMap<>();
+    private List<FederatedTokenDO> federatedTokens;
+    private Map<ClaimMapping, String> mappedRemoteClaims;
 
     public OAuthAuthzReqMessageContext getAuthzReqMsgCtx() {
         return authzReqMsgCtx;
@@ -158,5 +163,25 @@ public class SessionDataCacheEntry extends CacheEntry {
     public void setRemoveOnConsume(boolean removeOnConsume) {
 
         this.removeOnConsume = removeOnConsume;
+    }
+
+    public List<FederatedTokenDO> getFederatedTokens() {
+
+        return federatedTokens;
+    }
+
+    public void setFederatedTokens(List<FederatedTokenDO> federatedTokens) {
+
+        this.federatedTokens = federatedTokens;
+    }
+
+    public Map<ClaimMapping, String> getMappedRemoteClaims() {
+
+        return mappedRemoteClaims;
+    }
+
+    public void setMappedRemoteClaims(Map<ClaimMapping, String> mappedRemoteClaims) {
+
+        this.mappedRemoteClaims = mappedRemoteClaims;
     }
 }

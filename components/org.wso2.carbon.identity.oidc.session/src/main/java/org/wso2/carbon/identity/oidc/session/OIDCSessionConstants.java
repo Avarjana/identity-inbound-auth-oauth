@@ -51,6 +51,7 @@ public class OIDCSessionConstants {
 
         public static final String OIDC_LOGOUT_CONSENT_PAGE_URL = "OIDCLogoutConsentPage";
         public static final String OIDC_LOGOUT_PAGE_URL = "OIDCLogoutPage";
+        public static final String V2 = "V2";
         public static final String HANDLE_ALREADY_LOGGED_OUT_SESSIONS_GRACEFULLY =
                 "HandleAlreadyLoggedOutSessionsGracefully";
     }
@@ -62,6 +63,24 @@ public class OIDCSessionConstants {
 
         public static final String OIDC_SESSION_IFRAME_ENDPOINT = "/oidc/checksession";
         public static final String OIDC_LOGOUT_ENDPOINT = "/oidc/logout";
+    }
+
+    /**
+     * Contains the constants related to OIDC logout request sender.
+     */
+    public static class OIDCLogoutRequestConstants {
+
+        public static final String POOL_SIZE = "OAuth.OpenIDConnect.LogoutRequestSender.PoolSize";
+        public static final String WORK_QUEUE_SIZE = "OAuth.OpenIDConnect.LogoutRequestSender.WorkQueueSize";
+        public static final String KEEP_ALIVE_TIME = "OAuth.OpenIDConnect.LogoutRequestSender.KeepAliveTime";
+        public static final String HTTP_CONNECT_TIMEOUT = "OAuth.OpenIDConnect.LogoutRequestSender.HttpConnectTimeout";
+        public static final String HTTP_SOCKET_TIMEOUT = "OAuth.OpenIDConnect.LogoutRequestSender.HttpSocketTimeout";
+
+        public static final String DEFAULT_POOL_SIZE = "20";
+        public static final String DEFAULT_WORK_QUEUE_SIZE = "1000";
+        public static final String DEFAULT_KEEP_ALIVE_TIME = "60000";
+        public static final String DEFAULT_HTTP_CONNECT_TIMEOUT = "10000";
+        public static final String DEFAULT_HTTP_SOCKET_TIMEOUT = "20000";
     }
 
     private OIDCSessionConstants() {

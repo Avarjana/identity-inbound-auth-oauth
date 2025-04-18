@@ -1,7 +1,7 @@
 /*
- * Copyright (c) 2013, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
+ * Copyright (c) 2013-2025, WSO2 LLC. (http://www.wso2.com).
  *
- * WSO2 Inc. licenses this file to you under the Apache License,
+ * WSO2 LLC. licenses this file to you under the Apache License,
  * Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License.
  * You may obtain a copy of the License at
@@ -32,6 +32,7 @@ import org.apache.oltu.oauth2.as.validator.TokenValidator;
 import org.apache.oltu.oauth2.common.message.types.GrantType;
 import org.apache.oltu.oauth2.common.message.types.ResponseType;
 import org.apache.oltu.oauth2.common.validators.OAuthValidator;
+import org.wso2.carbon.base.ServerConfigurationException;
 import org.wso2.carbon.identity.application.common.cache.BaseCache;
 import org.wso2.carbon.identity.core.util.IdentityConfigParser;
 import org.wso2.carbon.identity.core.util.IdentityCoreConstants;
@@ -57,6 +58,7 @@ import org.wso2.carbon.identity.oauth2.token.OauthTokenIssuer;
 import org.wso2.carbon.identity.oauth2.token.OauthTokenIssuerImpl;
 import org.wso2.carbon.identity.oauth2.token.handlers.grant.AuthorizationGrantHandler;
 import org.wso2.carbon.identity.oauth2.token.handlers.grant.saml.SAML2TokenCallbackHandler;
+import org.wso2.carbon.identity.oauth2.util.OAuth2Util;
 import org.wso2.carbon.identity.oauth2.validators.OAuth2ScopeHandler;
 import org.wso2.carbon.identity.oauth2.validators.OAuth2ScopeValidator;
 import org.wso2.carbon.identity.oauth2.validators.grant.AuthorizationCodeGrantValidator;
@@ -120,20 +122,37 @@ public class OAuthServerConfiguration {
     private static final Log log = LogFactory.getLog(OAuthServerConfiguration.class);
     private static OAuthServerConfiguration instance;
     private static String oauth1RequestTokenUrl = null;
+    private static String oauth1RequestTokenUrlV2 = null;
     private static String oauth1AuthorizeUrl = null;
+    private static String oauth1AuthorizeUrlV2 = null;
     private static String oauth1AccessTokenUrl = null;
+    private static String oauth1AccessTokenUrlV2 = null;
     private static String oauth2AuthzEPUrl = null;
+    private static String oauth2AuthzEPUrlV2 = null;
+    private static String oauth2ParEPUrl = null;
+    private static String oauth2ParEPUrlV2 = null;
     private static String oauth2TokenEPUrl = null;
+    private static String oauth2TokenEPUrlV2 = null;
     private static String oauth2UserInfoEPUrl = null;
+    private static String oauth2UserInfoEPUrlV2 = null;
     private static String oauth2RevocationEPUrl = null;
+    private static String oauth2RevocationEPUrlV2 = null;
     private static String oauth2IntrospectionEPUrl = null;
+    private static String oauth2IntrospectionEPUrlV2 = null;
     private static String oidcConsentPageUrl = null;
+    private static String oidcConsentPageUrlV2 = null;
     private static String oauth2DCREPUrl = null;
+    private static String oauth2DCREPUrlV2 = null;
     private static String oauth2JWKSPageUrl = null;
+    private static String oauth2JWKSPageUrlV2 = null;
     private static String oidcWebFingerEPUrl = null;
+    private static String oidcWebFingerEPUrlV2 = null;
     private static String oidcDiscoveryUrl = null;
+    private static String oidcDiscoveryUrlV2 = null;
     private static String oauth2ConsentPageUrl = null;
+    private static String oauth2ConsentPageUrlV2 = null;
     private static String oauth2ErrorPageUrl = null;
+    private static String oauth2ErrorPageUrlV2 = null;
     private static boolean isOAuthResponseJspPageAvailable = false;
     private long authorizationCodeValidityPeriodInSeconds = 300;
     private long userAccessTokenValidityPeriodInSeconds = 3600;
@@ -141,6 +160,7 @@ public class OAuthServerConfiguration {
     private long applicationAccessTokenValidityPeriodInSeconds = 3600;
     private long refreshTokenValidityPeriodInSeconds = 24L * 3600;
     private long timeStampSkewInSeconds = 300;
+    private boolean enablePasswordFlowEnhancements = false;
     private String tokenPersistenceProcessorClassName =
             "org.wso2.carbon.identity.oauth.tokenprocessor.PlainTextPersistenceProcessor";
     private String oauthTokenGeneratorClassName;
@@ -157,12 +177,15 @@ public class OAuthServerConfiguration {
     private boolean isTokenRenewalPerRequestEnabled = false;
     private boolean isRefreshTokenRenewalEnabled = true;
     private boolean isExtendRenewedTokenExpiryTimeEnabled = true;
+    private boolean isValidateAuthenticatedUserForRefreshGrantEnabled = false;
     private boolean assertionsUserNameEnabled = false;
     private boolean accessTokenPartitioningEnabled = false;
     private boolean redirectToRequestedRedirectUriEnabled = true;
     private boolean allowCrossTenantIntrospection = true;
     private boolean useClientIdAsSubClaimForAppTokens = true;
     private boolean removeUsernameFromIntrospectionResponseForAppTokens = true;
+    private boolean useLegacyScopesAsAliasForNewScopes = false;
+    private boolean useLegacyPermissionAccessForUserBasedAuth = false;
     private String accessTokenPartitioningDomains = null;
     private TokenPersistenceProcessor persistenceProcessor = null;
     private Set<OAuthCallbackHandlerMetaData> callbackHandlerMetaData = new HashSet<>();
@@ -186,6 +209,7 @@ public class OAuthServerConfiguration {
     private Map<String, TokenIssuerDO> supportedTokenIssuers = new HashMap<>();
     private List<String> supportedTokenTypes = new ArrayList<>();
     private List<String> publicClientSupportedGrantTypes = new ArrayList<>();
+    private List<String> publicClientNotSupportedGrantTypes = new ArrayList<>();
     private Map<String, OauthTokenIssuer> oauthTokenIssuerMap = new HashMap<>();
     private String[] supportedClaims = null;
     private boolean isFapiCiba = false;
@@ -208,6 +232,9 @@ public class OAuthServerConfiguration {
     private String defaultIdTokenEncryptionMethod = "A128GCM";
     private List<String> supportedIdTokenEncryptionMethods = new ArrayList<>();
     private String userInfoJWTSignatureAlgorithm = "SHA256withRSA";
+    private boolean userInfoMultiValueSupportEnabled = true;
+    private boolean userInfoRemoveInternalPrefixFromRoles = false;
+
     private String authContextTTL = "15L";
     // property added to fix IDENTITY-4551 in backward compatible manner
     private boolean useMultiValueSeparatorForAuthContextToken = true;
@@ -230,11 +257,14 @@ public class OAuthServerConfiguration {
     public static final String DEFAULT_OAUTH_AUTHZ_REQUEST_CLASSNAME = CarbonOAuthAuthzRequest.class.getName();
     private String openIDConnectIDTokenCustomClaimsHanlderClassName =
             "org.wso2.carbon.identity.openidconnect.SAMLAssertionClaimsCallback";
+    private String jwtAccessTokenOIDCClaimsHandlerClassName =
+            "org.wso2.carbon.identity.openidconnect.JWTAccessTokenOIDCClaimsHandler";
     private IDTokenBuilder openIDConnectIDTokenBuilder = null;
     private Map<String, String> requestObjectBuilderClassNames = new HashMap<>();
     private volatile RequestObjectValidator requestObjectValidator = null;
     private volatile RequestObjectValidator cibaRequestObjectValidator = null;
     private CustomClaimsCallbackHandler openidConnectIDTokenCustomClaimsCallbackHandler = null;
+    private CustomClaimsCallbackHandler jwtAccessTokenOIDCClaimsHandler = null;
     private String openIDConnectIDTokenIssuerIdentifier = null;
     private String openIDConnectIDTokenSubClaim = "http://wso2.org/claims/fullname";
     private Boolean openIDConnectSkipUserConsent = true;
@@ -280,6 +310,11 @@ public class OAuthServerConfiguration {
     // Property added to customize the token valued generation method. (IDENTITY-6139)
     private ValueGenerator tokenValueGenerator;
 
+    // property to skip OIDC claims retrieval for client credential grant type.
+    // By default, this is true because OIDC claims are not required for client credential grant type
+    // and CC grant doesn't involve a user.
+    private boolean skipOIDCClaimsForClientCredentialGrant = true;
+
     private String tokenValueGeneratorClassName;
     //property to define hashing algorithm when enabling hashing of tokens and authorization codes.
     private String hashAlgorithm = "SHA-256";
@@ -293,6 +328,8 @@ public class OAuthServerConfiguration {
     private boolean enableIntrospectionDataProviders = false;
     // Property to define the allowed scopes.
     private List<String> allowedScopes = new ArrayList<>();
+    // Property to define the default requested scopes.
+    private List<String> defaultRequestedScopes = new ArrayList<>();
 
     // Property to define the filtered claims.
     private List<String> filteredIntrospectionClaims = new ArrayList<>();
@@ -306,6 +343,15 @@ public class OAuthServerConfiguration {
     private int deviceCodePollingInterval = 5000;
     private String deviceCodeKeySet = "BCDFGHJKLMNPQRSTVWXYZbcdfghjklmnpqrstvwxyz23456789";
     private String deviceAuthzEPUrl = null;
+    private String deviceAuthzEPUrlV2 = null;
+    private List<String> supportedTokenEndpointSigningAlgorithms = new ArrayList<>();
+    private Boolean roleBasedScopeIssuerEnabledConfig = false;
+    private String scopeMetadataExtensionImpl = null;
+    private static final List<String> HYBRID_RESPONSE_TYPES = Arrays.asList("code token",
+            "code id_token", "code id_token token");
+    private List<String> configuredHybridResponseTypes = new ArrayList<>();
+
+    private final List<String> restrictedQueryParameters = new ArrayList<>();
 
     private OAuthServerConfiguration() {
         buildOAuthServerConfiguration();
@@ -382,24 +428,32 @@ public class OAuthServerConfiguration {
         // read default timeout periods
         parseDefaultValidityPeriods(oauthElem);
 
+        parseEnablePasswordFlowEnhancements(oauthElem);
+
         // read OAuth URLs
         parseOAuthURLs(oauthElem);
+
+        // Read v2 OAuth URLS
+        parseV2OAuthURLs(oauthElem);
 
         // read token renewal per request config.
         // if enabled access token and refresh token will be renewed for each token endpoint call.
         parseTokenRenewalPerRequestConfiguration(oauthElem);
 
+        // Read map federated users to local config.
+        parseMapFederatedUsersToLocalConfiguration(oauthElem);
+
         // read refresh token renewal config
         parseRefreshTokenRenewalConfiguration(oauthElem);
+
+        // Read the authenticated user validation config for refresh grant.
+        parseRefreshTokenGrantValidationConfiguration(oauthElem);
 
         // read token persistence processor config
         parseTokenPersistenceProcessorConfig(oauthElem);
 
         // read supported grant types
         parseSupportedGrantTypesConfig(oauthElem);
-
-        // Read public client supported grant type names in <PublicClientSupportedGrantTypes>.
-        parsePublicClientSupportedGrantTypesConfig(oauthElem);
 
         // Read <UserConsentEnabledGrantTypes> under <OAuth> tag and populate data.
         parseUserConsentEnabledGrantTypesConfig(oauthElem);
@@ -431,6 +485,8 @@ public class OAuthServerConfiguration {
 
         // read openid connect configurations
         parseOpenIDConnectConfig(oauthElem);
+
+        parseSkipOIDCClaimsForClientCredentialGrantConfig(oauthElem);
 
         // parse OAuth 2.0 token generator
         parseOAuthTokenGeneratorConfig(oauthElem);
@@ -481,6 +537,9 @@ public class OAuthServerConfiguration {
         // Read config for allowed scopes.
         parseAllowedScopesConfiguration(oauthElem);
 
+        // Read config for default requested scopes.
+        parseDefaultRequestedScopesConfiguration(oauthElem);
+
         // Read config for filtered claims for introspection response.
         parseFilteredClaimsForIntrospectionConfiguration(oauthElem);
 
@@ -498,6 +557,41 @@ public class OAuthServerConfiguration {
 
         // Set the availability of oauth_response.jsp page.
         setOAuthResponseJspPageAvailable();
+
+        // Read config for RoleBasedScopeIssuer in GlobalScopeValidators enabled.
+        parseRoleBasedScopeIssuerEnabled(oauthElem);
+
+        // Read config for using legacy scopes as alias for new scopes.
+        parseUseLegacyScopesAsAliasForNewScopes(oauthElem);
+
+        // Read config for using legacy permission access for user based auth.
+        parseUseLegacyPermissionAccessForUserBasedAuth(oauthElem);
+
+        // Read config for scope metadata extension implementation.
+        parseScopeMetadataExtensionImpl(oauthElem);
+
+        // Read config for restricted query parameters in oauth requests
+        parseRestrictedQueryParameters(oauthElem);
+    }
+
+    /**
+     * Parse role based scope issuer enabled configuration under global scope validators.
+     *
+     * @param oauthConfigElem oauthConfigElem.
+     */
+    private void parseRoleBasedScopeIssuerEnabled(OMElement oauthConfigElem) {
+
+        OMElement globalScopeValidatorsElem = oauthConfigElem.getFirstChildWithName(
+                getQNameWithIdentityNS(ConfigElements.GLOBAL_SCOPE_VALIDATORS));
+        if (globalScopeValidatorsElem != null) {
+            OMElement roleBasedScopeIssuerEnabledElem = globalScopeValidatorsElem.getFirstChildWithName(
+                    getQNameWithIdentityNS(ConfigElements.ROLE_BASED_SCOPE_ISSUER_ENABLED));
+            if (roleBasedScopeIssuerEnabledElem != null) {
+                OMElement enableElem = roleBasedScopeIssuerEnabledElem.getFirstChildWithName(
+                        getQNameWithIdentityNS(ConfigElements.ENABLE));
+                roleBasedScopeIssuerEnabledConfig = Boolean.parseBoolean(enableElem.getText().trim());
+            }
+        }
     }
 
     /**
@@ -516,6 +610,41 @@ public class OAuthServerConfiguration {
                 OMElement scopeElement = (OMElement) scopeIterator.next();
                 allowedScopes.add(scopeElement.getText());
             }
+        }
+    }
+
+    /**
+     * Parse default requested scopes configuration.
+     *
+     * @param oauthConfigElem oauthConfigElem.
+     */
+    private void parseDefaultRequestedScopesConfiguration(OMElement oauthConfigElem) {
+
+        OMElement defaultRequestedScopesElem = oauthConfigElem.getFirstChildWithName(
+                getQNameWithIdentityNS(ConfigElements.DEFAULT_REQUESTED_SCOPES_ELEMENT));
+        if (defaultRequestedScopesElem != null) {
+            Iterator scopeIterator = defaultRequestedScopesElem.getChildrenWithName(getQNameWithIdentityNS(
+                    ConfigElements.SCOPES_ELEMENT));
+            while (scopeIterator.hasNext()) {
+                OMElement scopeElement = (OMElement) scopeIterator.next();
+                defaultRequestedScopes.add(scopeElement.getText());
+            }
+        }
+    }
+
+    /**
+     * Parse config for skipping OIDC claims for client credentials
+     *
+     * @param oauthElem OauthConfigElem.
+     */
+    private void parseSkipOIDCClaimsForClientCredentialGrantConfig(OMElement oauthElem) {
+
+        OMElement skipOIDCClaimsForClientCredentialGrantElement = oauthElem
+                .getFirstChildWithName(getQNameWithIdentityNS(ConfigElements
+                        .SKIP_OIDC_CLAIMS_FOR_CLIENT_CREDENTIAL_GRANT));
+        if (skipOIDCClaimsForClientCredentialGrantElement != null) {
+            skipOIDCClaimsForClientCredentialGrant = Boolean.parseBoolean(
+                    skipOIDCClaimsForClientCredentialGrantElement.getText().trim());
         }
     }
 
@@ -619,6 +748,16 @@ public class OAuthServerConfiguration {
         return filteredIntrospectionClaims;
     }
 
+    /**
+     * Get the list of default requested scopes.
+     *
+     * @return String returns a list of default requested scope string.
+     */
+    public List<String> getDefaultRequestedScopes() {
+
+        return defaultRequestedScopes;
+    }
+
     public String getOAuth1RequestTokenUrl() {
         return oauth1RequestTokenUrl;
     }
@@ -633,6 +772,11 @@ public class OAuthServerConfiguration {
 
     public String getOAuth2AuthzEPUrl() {
         return oauth2AuthzEPUrl;
+    }
+
+    public String getOAuth2ParEPUrl() {
+
+        return oauth2ParEPUrl;
     }
 
     public String getOAuth2TokenEPUrl() {
@@ -672,6 +816,86 @@ public class OAuthServerConfiguration {
     public String getDeviceAuthzEPUrl() {
 
         return deviceAuthzEPUrl;
+    }
+
+    public String getOAuth1RequestTokenUrlV2() {
+
+        return oauth1RequestTokenUrlV2;
+    }
+
+    public String getOauth1AuthorizeUrlV2() {
+
+        return oauth1AuthorizeUrlV2;
+    }
+
+    public String getOauth1AccessTokenUrlV2() {
+
+        return oauth1AccessTokenUrlV2;
+    }
+
+    public String getOauth2AuthzEPUrlV2() {
+
+        return oauth2AuthzEPUrlV2;
+    }
+
+    public String getOauth2ParEPUrlV2() {
+
+        return oauth2ParEPUrlV2;
+    }
+
+    public String getOauth2TokenEPUrlV2() {
+
+        return oauth2TokenEPUrlV2;
+    }
+
+    public String getOauth2DCREPUrlV2() {
+
+        return oauth2DCREPUrlV2;
+    }
+
+    public String getOauth2JWKSPageUrlV2() {
+
+        return oauth2JWKSPageUrlV2;
+    }
+
+    public String getOidcDiscoveryUrlV2() {
+
+        return oidcDiscoveryUrlV2;
+    }
+
+    public String getOidcWebFingerEPUrlV2() {
+
+        return oidcWebFingerEPUrlV2;
+    }
+
+    public String getOauth2UserInfoEPUrlV2() {
+
+        return oauth2UserInfoEPUrlV2;
+    }
+
+    public String getOauth2RevocationEPUrlV2() {
+
+        return oauth2RevocationEPUrlV2;
+    }
+
+    public String getOauth2IntrospectionEPUrlV2() {
+
+        return oauth2IntrospectionEPUrlV2;
+    }
+
+    public String getDeviceAuthzEPUrlV2() {
+
+        return deviceAuthzEPUrlV2;
+    }
+
+    public boolean isRoleBasedScopeIssuerEnabled() {
+
+        return roleBasedScopeIssuerEnabledConfig;
+    }
+
+    public boolean isSkipOIDCClaimsForClientCredentialGrant() {
+
+        return skipOIDCClaimsForClientCredentialGrant;
     }
     /**
      * instantiate the OAuth token generator. to override the default implementation, one can specify the custom class
@@ -788,6 +1012,11 @@ public class OAuthServerConfiguration {
         return Boolean.TRUE.toString().equalsIgnoreCase(retainOldAccessTokens);
     }
 
+    public List<String> getConfiguredHybridResponseTypes() {
+
+        return configuredHybridResponseTypes;
+    }
+
     public boolean isTokenCleanupEnabled() {
 
         return Boolean.TRUE.toString().equalsIgnoreCase(tokenCleanupFeatureEnable);
@@ -797,12 +1026,31 @@ public class OAuthServerConfiguration {
         return oidcConsentPageUrl;
     }
 
+    public String getOIDCConsentPageUrlV2() {
+
+        return oidcConsentPageUrlV2;
+    }
+
     public String getOauth2ConsentPageUrl() {
         return oauth2ConsentPageUrl;
     }
 
+    public String getOauth2ConsentPageUrlV2() {
+
+        return oauth2ConsentPageUrlV2;
+    }
+
     public String getOauth2ErrorPageUrl() {
         return oauth2ErrorPageUrl;
+    }
+
+    public String getOauth2ErrorPageUrlV2() {
+
+        return oauth2ErrorPageUrlV2;
+    }
+
+    public boolean isPasswordFlowEnhancementsEnabled() {
+        return enablePasswordFlowEnhancements;
     }
 
     public long getAuthorizationCodeValidityPeriodInSeconds() {
@@ -848,6 +1096,16 @@ public class OAuthServerConfiguration {
 
     public boolean isExtendRenewedTokenExpiryTimeEnabled() {
         return isExtendRenewedTokenExpiryTimeEnabled;
+    }
+
+    /**
+     * Check if the authenticated user validation is enabled for refresh token grant flow.
+     *
+     * @return Returns true if the config is enabled.
+     */
+    public boolean isValidateAuthenticatedUserForRefreshGrantEnabled() {
+
+        return isValidateAuthenticatedUserForRefreshGrantEnabled;
     }
 
     public Map<String, OauthTokenIssuer> getOauthTokenIssuerMap() {
@@ -1351,6 +1609,26 @@ public class OAuthServerConfiguration {
         return userInfoJWTSignatureAlgorithm;
     }
 
+    /**
+     * Returns whether multi value support is enabled for userinfo response.
+     *
+     * @return True if multi value support is enabled for userinfo response.
+     */
+    public boolean getUserInfoMultiValueSupportEnabled() {
+
+        return userInfoMultiValueSupportEnabled;
+    }
+
+    /**
+     * Returns whether Internal prefix should be removed from the roles claim of the userinfo response.
+     *
+     * @return True if Internal prefix value should be removed from the role claim of userinfo response.
+     */
+    public boolean isUserInfoResponseRemoveInternalPrefixFromRoles() {
+
+        return userInfoRemoveInternalPrefixFromRoles;
+    }
+
     public String getConsumerDialectURI() {
         return consumerDialectURI;
     }
@@ -1365,6 +1643,10 @@ public class OAuthServerConfiguration {
 
     public boolean isUseMultiValueSeparatorForAuthContextToken() {
         return useMultiValueSeparatorForAuthContextToken;
+    }
+
+    public List<String> getRestrictedQueryParameters() {
+        return restrictedQueryParameters;
     }
 
     public TokenPersistenceProcessor getPersistenceProcessor() throws IdentityOAuth2Exception {
@@ -1905,6 +2187,15 @@ public class OAuthServerConfiguration {
         return new OAuthCallbackHandlerMetaData(className, properties, priority);
     }
 
+    private void parseEnablePasswordFlowEnhancements(OMElement oauthConfigElem) {
+        OMElement enablePasswordFlowEnhancementsElem =
+                oauthConfigElem.getFirstChildWithName(
+                        getQNameWithIdentityNS(ConfigElements.ENABLE_PASSWORD_FLOW_ENHANCEMENTS));
+        if (enablePasswordFlowEnhancementsElem != null) {
+            enablePasswordFlowEnhancements = Boolean.parseBoolean(enablePasswordFlowEnhancementsElem.getText());
+        }
+    }
+
     private void parseDefaultValidityPeriods(OMElement oauthConfigElem) {
 
         // Set the authorization code default timeout
@@ -2011,6 +2302,13 @@ public class OAuthServerConfiguration {
             }
         }
         elem = oauthConfigElem.getFirstChildWithName(getQNameWithIdentityNS(
+                ConfigElements.OAUTH2_PAR_EP_URL));
+        if (elem != null) {
+            if (StringUtils.isNotBlank(elem.getText())) {
+                oauth2ParEPUrl = IdentityUtil.fillURLPlaceholders(elem.getText());
+            }
+        }
+        elem = oauthConfigElem.getFirstChildWithName(getQNameWithIdentityNS(
                 ConfigElements.OAUTH2_TOKEN_EP_URL));
         if (elem != null) {
             if (StringUtils.isNotBlank(elem.getText())) {
@@ -2096,6 +2394,121 @@ public class OAuthServerConfiguration {
         }
     }
 
+    private void parseV2OAuthURLs(OMElement oauthConfigElem) {
+
+        OMElement oauthConfigElemV2 = oauthConfigElem.getFirstChildWithName(getQNameWithIdentityNS(ConfigElements.V2));
+
+        if (oauthConfigElemV2 == null) {
+            return;
+        }
+
+        OMElement elem = oauthConfigElemV2.getFirstChildWithName(
+                getQNameWithIdentityNS(ConfigElements.OAUTH1_REQUEST_TOKEN_URL));
+        if (elem != null) {
+            if (StringUtils.isNotBlank(elem.getText())) {
+                oauth1RequestTokenUrlV2 = IdentityUtil.fillURLPlaceholders(elem.getText());
+            }
+        }
+        elem = oauthConfigElemV2.getFirstChildWithName(getQNameWithIdentityNS(ConfigElements.OAUTH1_AUTHORIZE_URL));
+        if (elem != null) {
+            if (StringUtils.isNotBlank(elem.getText())) {
+                oauth1AuthorizeUrlV2 = IdentityUtil.fillURLPlaceholders(elem.getText());
+            }
+        }
+        elem = oauthConfigElemV2.getFirstChildWithName(getQNameWithIdentityNS(ConfigElements.OAUTH1_ACCESS_TOKEN_URL));
+        if (elem != null) {
+            if (StringUtils.isNotBlank(elem.getText())) {
+                oauth1AccessTokenUrlV2 = IdentityUtil.fillURLPlaceholders(elem.getText());
+            }
+        }
+        elem = oauthConfigElemV2.getFirstChildWithName(getQNameWithIdentityNS(ConfigElements.OAUTH2_AUTHZ_EP_URL));
+        if (elem != null) {
+            if (StringUtils.isNotBlank(elem.getText())) {
+                oauth2AuthzEPUrlV2 = IdentityUtil.fillURLPlaceholders(elem.getText());
+            }
+        }
+        elem = oauthConfigElemV2.getFirstChildWithName(getQNameWithIdentityNS(ConfigElements.OAUTH2_PAR_EP_URL));
+        if (elem != null) {
+            if (StringUtils.isNotBlank(elem.getText())) {
+                oauth2ParEPUrlV2 = IdentityUtil.fillURLPlaceholders(elem.getText());
+            }
+        }
+        elem = oauthConfigElemV2.getFirstChildWithName(getQNameWithIdentityNS(ConfigElements.OAUTH2_TOKEN_EP_URL));
+        if (elem != null) {
+            if (StringUtils.isNotBlank(elem.getText())) {
+                oauth2TokenEPUrlV2 = IdentityUtil.fillURLPlaceholders(elem.getText());
+            }
+        }
+        elem = oauthConfigElemV2.getFirstChildWithName(getQNameWithIdentityNS(ConfigElements.OAUTH2_USERINFO_EP_URL));
+        if (elem != null) {
+            if (StringUtils.isNotBlank(elem.getText())) {
+                oauth2UserInfoEPUrlV2 = IdentityUtil.fillURLPlaceholders(elem.getText());
+            }
+        }
+        elem = oauthConfigElemV2.getFirstChildWithName(
+                getQNameWithIdentityNS(ConfigElements.OAUTH2_REVOCATION_EP_URL));
+        if (elem != null) {
+            if (StringUtils.isNotBlank(elem.getText())) {
+                oauth2RevocationEPUrlV2 = IdentityUtil.fillURLPlaceholders(elem.getText());
+            }
+        }
+        elem = oauthConfigElemV2.getFirstChildWithName(
+                getQNameWithIdentityNS(ConfigElements.OAUTH2_INTROSPECTION_EP_URL));
+        if (elem != null) {
+            if (StringUtils.isNotBlank(elem.getText())) {
+                oauth2IntrospectionEPUrlV2 = IdentityUtil.fillURLPlaceholders(elem.getText());
+            }
+        }
+        elem = oauthConfigElemV2.getFirstChildWithName(getQNameWithIdentityNS(ConfigElements.OAUTH2_CONSENT_PAGE_URL));
+        if (elem != null) {
+            if (StringUtils.isNotBlank(elem.getText())) {
+                oauth2ConsentPageUrlV2 = IdentityUtil.fillURLPlaceholders(elem.getText());
+            }
+        }
+        elem = oauthConfigElemV2.getFirstChildWithName(getQNameWithIdentityNS(ConfigElements.OAUTH2_DCR_EP_URL));
+        if (elem != null) {
+            if (StringUtils.isNotBlank(elem.getText())) {
+                oauth2DCREPUrlV2 = IdentityUtil.fillURLPlaceholders(elem.getText());
+            }
+        }
+        elem = oauthConfigElemV2.getFirstChildWithName(getQNameWithIdentityNS(ConfigElements.OAUTH2_JWKS_PAGE_URL));
+        if (elem != null) {
+            if (StringUtils.isNotBlank(elem.getText())) {
+                oauth2JWKSPageUrlV2 = IdentityUtil.fillURLPlaceholders(elem.getText());
+            }
+        }
+        elem = oauthConfigElemV2.getFirstChildWithName(getQNameWithIdentityNS(ConfigElements.OIDC_DISCOVERY_EP_URL));
+        if (elem != null) {
+            if (StringUtils.isNotBlank(elem.getText())) {
+                oidcDiscoveryUrlV2 = IdentityUtil.fillURLPlaceholders(elem.getText());
+            }
+        }
+        elem = oauthConfigElemV2.getFirstChildWithName(getQNameWithIdentityNS(ConfigElements.OIDC_WEB_FINGER_EP_URL));
+        if (elem != null) {
+            if (StringUtils.isNotBlank(elem.getText())) {
+                oidcWebFingerEPUrlV2 = IdentityUtil.fillURLPlaceholders(elem.getText());
+            }
+        }
+        elem = oauthConfigElemV2.getFirstChildWithName(getQNameWithIdentityNS(ConfigElements.OIDC_CONSENT_PAGE_URL));
+        if (elem != null) {
+            if (StringUtils.isNotBlank(elem.getText())) {
+                oidcConsentPageUrlV2 = IdentityUtil.fillURLPlaceholders(elem.getText());
+            }
+        }
+        elem = oauthConfigElemV2.getFirstChildWithName(getQNameWithIdentityNS(ConfigElements.OAUTH2_ERROR_PAGE_URL));
+        if (elem != null) {
+            if (StringUtils.isNotBlank(elem.getText())) {
+                oauth2ErrorPageUrlV2 = IdentityUtil.fillURLPlaceholders(elem.getText());
+            }
+        }
+        elem = oauthConfigElemV2.getFirstChildWithName(getQNameWithIdentityNS(ConfigElements.DEVICE_AUTHZ_EP_URL));
+        if (elem != null) {
+            if (StringUtils.isNotBlank(elem.getText())) {
+                deviceAuthzEPUrlV2 = IdentityUtil.fillURLPlaceholders(elem.getText());
+            }
+        }
+    }
+
     private void parseRefreshTokenRenewalConfiguration(OMElement oauthConfigElem) {
 
         OMElement enableRefreshTokenRenewalElem = oauthConfigElem.getFirstChildWithName(getQNameWithIdentityNS(
@@ -2114,6 +2527,20 @@ public class OAuthServerConfiguration {
         }
         if (log.isDebugEnabled()) {
             log.debug("ExtendRenewedRefreshTokenExpiryTime was set to : " + isExtendRenewedTokenExpiryTimeEnabled);
+        }
+    }
+
+    private void parseRefreshTokenGrantValidationConfiguration(OMElement oauthConfigElem) {
+
+        OMElement validateAuthenticatedUserForRefreshGrantElem = oauthConfigElem.getFirstChildWithName(
+                getQNameWithIdentityNS(ConfigElements.VALIDATE_AUTHENTICATED_USER_FOR_REFRESH_GRANT));
+        if (validateAuthenticatedUserForRefreshGrantElem != null) {
+            isValidateAuthenticatedUserForRefreshGrantEnabled =
+                    Boolean.parseBoolean(validateAuthenticatedUserForRefreshGrantElem.getText());
+        }
+        if (log.isDebugEnabled()) {
+            log.debug("ValidateAuthenticatedUserForRefreshGrant was set to : " +
+                    isValidateAuthenticatedUserForRefreshGrantEnabled);
         }
     }
 
@@ -2355,6 +2782,29 @@ public class OAuthServerConfiguration {
                         refreshTokenAllowedGrantTypes.put(grantTypeName, isRefreshAllowed);
                     }
                 }
+
+                /* Read the public client allowed grant types for all grant types.
+                 * Grant types added with PublicClientAllowed property and value set to true will be added to
+                 * publicClientSupportedGrantTypes list and value set to false will be added to
+                 * publicClientNotSupportedGrantTypes. All default grant types will have the property set to either the
+                 * value.
+                 * If the property is not mentioned in the custom grant type configuration, the grant type will not be
+                 * added to either lists. So, if the custom grant type is added to the array configuration of allowed,
+                 * grant types, it will get added to the publicClientSupportedGrantTypes list.
+                 */
+                OMElement publicClientAllowedElement = supportedGrantTypeElement
+                        .getFirstChildWithName(getQNameWithIdentityNS(ConfigElements.PUBLIC_CLIENT_ALLOWED));
+                String publicClientAllowed = null;
+                if (publicClientAllowedElement != null) {
+                    publicClientAllowed = publicClientAllowedElement.getText();
+                }
+                if (StringUtils.isNotEmpty(publicClientAllowed)) {
+                    if (Boolean.parseBoolean(publicClientAllowed)) {
+                        publicClientSupportedGrantTypes.add(grantTypeName);
+                    } else {
+                        publicClientNotSupportedGrantTypes.add(grantTypeName);
+                    }
+                }
             }
         } else {
             // if this element is not present, assume the default case.
@@ -2378,22 +2828,6 @@ public class OAuthServerConfiguration {
                 String grantTypeName = entry.getKey().toString();
                 String authzGrantHandlerImplClass = entry.getValue().toString();
                 log.debug(grantTypeName + "supported by" + authzGrantHandlerImplClass);
-            }
-        }
-    }
-
-    private void parsePublicClientSupportedGrantTypesConfig(OMElement oauthConfigElem) {
-
-        OMElement publicClientGrantTypesElem = oauthConfigElem.getFirstChildWithName(getQNameWithIdentityNS(
-                ConfigElements.PUBLIC_CLIENT_SUPPORTED_GRANT_TYPES));
-        if (publicClientGrantTypesElem != null) {
-            Iterator iterator = publicClientGrantTypesElem
-                    .getChildrenWithName(getQNameWithIdentityNS(ConfigElements.PUBLIC_CLIENT_ENABLED_GRANT_TYPE_NAME));
-            while (iterator.hasNext()) {
-                OMElement publicClientSupportedGrantName = (OMElement) iterator.next();
-                if (publicClientSupportedGrantName != null) {
-                    publicClientSupportedGrantTypes.add(publicClientSupportedGrantName.getText());
-                }
             }
         }
     }
@@ -2586,6 +3020,11 @@ public class OAuthServerConfiguration {
                 }
                 if (responseTypeName != null && !"".equals(responseTypeName) &&
                         responseTypeHandlerImplClass != null && !"".equals(responseTypeHandlerImplClass)) {
+
+                    // check for the configured hybrid response type
+                    if (HYBRID_RESPONSE_TYPES.contains(responseTypeName)) {
+                        configuredHybridResponseTypes.add(responseTypeName);
+                    }
                     supportedResponseTypeClassNames.put(responseTypeName, responseTypeHandlerImplClass);
                     OMElement responseTypeValidatorClassNameElement = supportedResponseTypeElement
                             .getFirstChildWithName(
@@ -3117,6 +3556,20 @@ public class OAuthServerConfiguration {
                                 getQNameWithIdentityNS(ConfigElements.OPENID_CONNECT_USERINFO_JWT_SIGNATURE_ALGORITHM))
                                 .getText().trim();
             }
+            OMElement userInfoMultiValueSupportEnabledElem = openIDConnectConfigElem.getFirstChildWithName(
+                    getQNameWithIdentityNS(ConfigElements.OPENID_CONNECT_USERINFO_MULTI_VALUE_SUPPORT_ENABLED));
+            if (userInfoMultiValueSupportEnabledElem != null) {
+                userInfoMultiValueSupportEnabled = Boolean.parseBoolean(
+                        userInfoMultiValueSupportEnabledElem.getText().trim());
+            }
+
+            OMElement userInfoResponseRemoveInternalPrefixFromRoles = openIDConnectConfigElem.getFirstChildWithName(
+                    getQNameWithIdentityNS(ConfigElements.OPENID_CONNECT_USERINFO_REMOVE_INTERNAL_PREFIX_FROM_ROLES));
+            if (userInfoResponseRemoveInternalPrefixFromRoles != null) {
+                userInfoRemoveInternalPrefixFromRoles =
+                        Boolean.parseBoolean(userInfoResponseRemoveInternalPrefixFromRoles.getText().trim());
+            }
+
             if (openIDConnectConfigElem.getFirstChildWithName(
                     getQNameWithIdentityNS(ConfigElements.OPENID_CONNECT_SIGN_JWT_WITH_SP_KEY)) != null) {
                 isJWTSignedWithSPKey = Boolean.parseBoolean(openIDConnectConfigElem.getFirstChildWithName(
@@ -3198,6 +3651,17 @@ public class OAuthServerConfiguration {
                     requestObjectEnabled = false;
                 }
             }
+
+            if (openIDConnectConfigElem.getFirstChildWithName(
+                    getQNameWithIdentityNS(ConfigElements.SUPPORTED_TOKEN_ENDPOINT_SIGNING_ALGS)) != null) {
+                try {
+                    parseSupportedTokenEndpointSigningAlgorithms(openIDConnectConfigElem.getFirstChildWithName(
+                            getQNameWithIdentityNS(ConfigElements.SUPPORTED_TOKEN_ENDPOINT_SIGNING_ALGS)));
+                } catch (ServerConfigurationException e) {
+                    log.error("Error while parsing supported token endpoint signing algorithms.", e);
+                }
+            }
+
             OMElement oAuthAuthzRequest = openIDConnectConfigElem.getFirstChildWithName(getQNameWithIdentityNS
                     (ConfigElements.OAUTH_AUTHZ_REQUEST_CLASS));
             oAuthAuthzRequestClassName = (oAuthAuthzRequest != null) ? oAuthAuthzRequest.getText().trim() :
@@ -3357,6 +3821,23 @@ public class OAuthServerConfiguration {
     }
 
     /**
+     * Parses the map federated users to local configuration.
+     *
+     * @param oauthConfigElem oauthConfigElem.
+     */
+    private void parseMapFederatedUsersToLocalConfiguration(OMElement oauthConfigElem) {
+
+        OMElement mapFederatedUsersToLocalConfigElem = oauthConfigElem.getFirstChildWithName(getQNameWithIdentityNS(
+                ConfigElements.MAP_FED_USERS_TO_LOCAL));
+        if (mapFederatedUsersToLocalConfigElem != null) {
+            mapFederatedUsersToLocal = Boolean.parseBoolean(mapFederatedUsersToLocalConfigElem.getText());
+        }
+        if (log.isDebugEnabled()) {
+            log.debug("MapFederatedUsersToLocal was set to : " + mapFederatedUsersToLocal);
+        }
+    }
+
+    /**
      * This method populates oauthTokenIssuerMap by reading the supportedTokenIssuers map. Earlier we only
      * populated the oauthTokenIssuerMap when a token is issued but now we use this map for token validation
      * calls as well.
@@ -3468,6 +3949,59 @@ public class OAuthServerConfiguration {
         return removeUsernameFromIntrospectionResponseForAppTokens;
     }
 
+    /**
+     * Parse the UseLegacyScopesAsAliasForNewScopes configuration that used to use legacy scopes as alias for
+     * new scopes.
+     *
+     * @param oauthConfigElem oauthConfigElem.
+     */
+    private void parseUseLegacyScopesAsAliasForNewScopes(OMElement oauthConfigElem) {
+
+        OMElement useLegacyScopesAsAliasForNewScopesElem = oauthConfigElem.getFirstChildWithName(
+                getQNameWithIdentityNS(ConfigElements.USE_LEGACY_SCOPES_AS_ALIAS_FOR_NEW_SCOPES));
+        if (useLegacyScopesAsAliasForNewScopesElem != null) {
+            useLegacyScopesAsAliasForNewScopes = Boolean.parseBoolean(useLegacyScopesAsAliasForNewScopesElem.getText());
+        }
+    }
+
+    /**
+     * This method returns the value of the property UseLegacyScopesAsAliasForNewScopes for the OAuth configuration in
+     * identity.xml.
+     *
+     * @return true if the UseLegacyScopesAsAliasForNewScopes is enabled.
+     */
+    public boolean isUseLegacyScopesAsAliasForNewScopesEnabled() {
+
+        return useLegacyScopesAsAliasForNewScopes;
+    }
+
+    /**
+     * Parse the UseLegacyPermissionAccessForUserBasedAuth configuration that used to give legacy permission access in
+     * user based authentication handlers.
+     *
+     * @param oauthConfigElem oauthConfigElem.
+     */
+    private void parseUseLegacyPermissionAccessForUserBasedAuth(OMElement oauthConfigElem) {
+
+        OMElement useLegacyPermissionAccessForUserBasedAuthElem = oauthConfigElem.getFirstChildWithName(
+                getQNameWithIdentityNS(ConfigElements.USE_LEGACY_PERMISSION_ACCESS_FOR_USER_BASED_AUTH));
+        if (useLegacyPermissionAccessForUserBasedAuthElem != null) {
+            useLegacyPermissionAccessForUserBasedAuth =
+                    Boolean.parseBoolean(useLegacyPermissionAccessForUserBasedAuthElem.getText());
+        }
+    }
+
+    /**
+     * This method returns the value of the property UseLegacyPermissionAccessForUserBasedAuth for the OAuth
+     * configuration in identity.xml.
+     *
+     * @return true if the UseLegacyPermissionAccessForUserBasedAuth is enabled.
+     */
+    public boolean isUseLegacyPermissionAccessForUserBasedAuth() {
+
+        return useLegacyPermissionAccessForUserBasedAuth;
+    }
+
     private static void setOAuthResponseJspPageAvailable() {
 
         java.nio.file.Path path = Paths.get(CarbonUtils.getCarbonHome(), "repository", "deployment",
@@ -3502,6 +4036,103 @@ public class OAuthServerConfiguration {
         this.globalRbacScopeIssuerEnabled = globalRbacScopeIssuerEnabled;
     }
 
+    public List<String> getSupportedTokenEndpointSigningAlgorithms() {
+
+        return supportedTokenEndpointSigningAlgorithms;
+    }
+
+    /**
+     * Parse supported signing algorithms and add them to the supportedTokenEndpointSigningAlgorithms list.
+     *
+     * @param algorithms OMElement of supported algorithms.
+     */
+    private void parseSupportedTokenEndpointSigningAlgorithms(OMElement algorithms)
+            throws ServerConfigurationException {
+
+        if (algorithms == null) {
+            return;
+        }
+
+        Iterator iterator = algorithms.getChildrenWithLocalName(
+                ConfigElements.SUPPORTED_TOKEN_ENDPOINT_SIGNING_ALG);
+        if (iterator != null) {
+            while (iterator.hasNext()) {
+                OMElement algorithm = (OMElement) iterator.next();
+                if (algorithm != null) {
+                    try {
+                        supportedTokenEndpointSigningAlgorithms.add(String.valueOf(
+                                OAuth2Util.mapSignatureAlgorithmForJWSAlgorithm(algorithm.getText())));
+                    } catch (IdentityOAuth2Exception e) {
+                        throw new ServerConfigurationException("Unsupported signature algorithm configured.", e);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Parse the OAuth2ScopeMetadataExtensionImpl configuration that used to set the scope metadata extension impl
+     * class.
+     *
+     * @param oauthConfigElem oauthConfigElem.
+     */
+    private void parseScopeMetadataExtensionImpl(OMElement oauthConfigElem) {
+
+        OMElement scopeMetadataExtensionImplElem = oauthConfigElem.getFirstChildWithName(
+                getQNameWithIdentityNS(ConfigElements.SCOPE_METADATA_EXTENSION_IMPL));
+        if (scopeMetadataExtensionImplElem != null) {
+            scopeMetadataExtensionImpl = scopeMetadataExtensionImplElem.getText();
+        }
+    }
+
+    private void parseRestrictedQueryParameters(OMElement oauthConfigElem) {
+
+        OMElement restrictedQueryParametersElem = oauthConfigElem.getFirstChildWithName(
+                getQNameWithIdentityNS(ConfigElements.RESTRICTED_QUERY_PARAMETERS_ELEMENT));
+        if (restrictedQueryParametersElem != null) {
+            Iterator paramIterator = restrictedQueryParametersElem.getChildrenWithName(getQNameWithIdentityNS(
+                    ConfigElements.RESTRICTED_QUERY_PARAMETER_ELEMENT));
+            while (paramIterator.hasNext()) {
+                OMElement paramElement = (OMElement) paramIterator.next();
+                restrictedQueryParameters.add(paramElement.getText());
+            }
+        }
+    }
+
+    /**
+     * Get scope metadata service extension impl class.
+     *
+     * @return ScopeMetadataExtensionImpl class name.
+     */
+    public String getScopeMetadataExtensionImpl() {
+
+        return scopeMetadataExtensionImpl;
+    }
+
+    /**
+     * Get JWTAccessTokenOIDCClaimsHandler
+     *
+     * @return JWTAccessTokenOIDCClaimsHandler
+     */
+    public CustomClaimsCallbackHandler getJWTAccessTokenOIDCClaimsHandler() {
+        if (jwtAccessTokenOIDCClaimsHandler == null) {
+            synchronized (CustomClaimsCallbackHandler.class) {
+                if (jwtAccessTokenOIDCClaimsHandler == null) {
+                    try {
+                        Class clazz =
+                                Thread.currentThread().getContextClassLoader()
+                                        .loadClass(jwtAccessTokenOIDCClaimsHandlerClassName);
+                        jwtAccessTokenOIDCClaimsHandler =
+                                (CustomClaimsCallbackHandler) clazz.newInstance();
+                    } catch (ClassNotFoundException | InstantiationException | IllegalAccessException e) {
+                        log.error("Error while instantiating the JWTAccessTokenOIDCClaimsHandler ", e);
+                    }
+                }
+            }
+        }
+        return jwtAccessTokenOIDCClaimsHandler;
+    }
+
     /**
      * Localpart names for the OAuth configuration in identity.xml.
      */
@@ -3512,6 +4143,7 @@ public class OAuthServerConfiguration {
         public static final String OAUTH1_AUTHORIZE_URL = "OAuth1AuthorizeUrl";
         public static final String OAUTH1_ACCESS_TOKEN_URL = "OAuth1AccessTokenUrl";
         public static final String OAUTH2_AUTHZ_EP_URL = "OAuth2AuthzEPUrl";
+        public static final String OAUTH2_PAR_EP_URL = "OAuth2ParEPUrl";
         public static final String OAUTH2_TOKEN_EP_URL = "OAuth2TokenEPUrl";
         public static final String OAUTH2_USERINFO_EP_URL = "OAuth2UserInfoEPUrl";
         public static final String OAUTH2_REVOCATION_EP_URL = "OAuth2RevokeEPUrl";
@@ -3524,6 +4156,7 @@ public class OAuthServerConfiguration {
         public static final String OAUTH2_ERROR_PAGE_URL = "OAuth2ErrorPage";
         public static final String OIDC_CONSENT_PAGE_URL = "OIDCConsentPage";
         public static final String DEVICE_AUTHZ_EP_URL = "OAuth2DeviceAuthzEPUrl";
+        public static final String V2 = "V2";
 
         // JWT Generator
         public static final String AUTHORIZATION_CONTEXT_TOKEN_GENERATION = "AuthorizationContextTokenGeneration";
@@ -3564,6 +4197,10 @@ public class OAuthServerConfiguration {
         public static final String OPENID_CONNECT_USERINFO_ENDPOINT_RESPONSE_BUILDER =
                 "UserInfoEndpointResponseBuilder";
         public static final String OPENID_CONNECT_USERINFO_JWT_SIGNATURE_ALGORITHM = "UserInfoJWTSignatureAlgorithm";
+        public static final String OPENID_CONNECT_USERINFO_MULTI_VALUE_SUPPORT_ENABLED =
+                "UserInfoMultiValueSupportEnabled";
+        public static final String OPENID_CONNECT_USERINFO_REMOVE_INTERNAL_PREFIX_FROM_ROLES =
+                "UserInfoRemoveInternalPrefixFromRoles";
         public static final String OPENID_CONNECT_SIGN_JWT_WITH_SP_KEY = "SignJWTWithSPKey";
         public static final String OPENID_CONNECT_IDTOKEN_CUSTOM_CLAIM_CALLBACK_HANDLER =
                 "IDTokenCustomClaimsCallBackHandler";
@@ -3618,6 +4255,8 @@ public class OAuthServerConfiguration {
 
         // Default timestamp skew
         private static final String TIMESTAMP_SKEW = "TimestampSkew";
+        // Enable password flow enhancements
+        private static final String ENABLE_PASSWORD_FLOW_ENHANCEMENTS = "EnablePasswordFlowEnhancements";
         // Default validity periods
         private static final String AUTHORIZATION_CODE_DEFAULT_VALIDITY_PERIOD =
                 "AuthorizationCodeDefaultValidityPeriod";
@@ -3631,6 +4270,9 @@ public class OAuthServerConfiguration {
         private static final String ENABLE_CACHE = "EnableOAuthCache";
         // Enable/Disable refresh token renewal on each refresh_token grant request
         private static final String RENEW_REFRESH_TOKEN_FOR_REFRESH_GRANT = "RenewRefreshTokenForRefreshGrant";
+        // Enable/Disable Authenticated user validation on refresh_token grant request.
+        private static final String VALIDATE_AUTHENTICATED_USER_FOR_REFRESH_GRANT =
+                "ValidateAuthenticatedUserForRefreshGrant";
         // Enable/Disable extend the lifetime of the new refresh token
         private static final String EXTEND_RENEWED_REFRESH_TOKEN_EXPIRY_TIME = "ExtendRenewedRefreshTokenExpiryTime";
         // TokenPersistenceProcessor
@@ -3672,6 +4314,7 @@ public class OAuthServerConfiguration {
         private static final String GRANT_TYPE_VALIDATOR_IMPL_CLASS = "GrantTypeValidatorImplClass";
         private static final String RESPONSE_TYPE_VALIDATOR_IMPL_CLASS = "ResponseTypeValidatorImplClass";
         private static final String TOKEN_TYPE_IMPL_CLASS = "TokenTypeImplClass";
+        private static final String PUBLIC_CLIENT_ALLOWED = "PublicClientAllowed";
         // Supported Client Authentication Methods
         private static final String CLIENT_AUTH_HANDLERS = "ClientAuthHandlers";
         private static final String CLIENT_AUTH_HANDLER_IMPL_CLASS = "ClientAuthHandler";
@@ -3727,10 +4370,15 @@ public class OAuthServerConfiguration {
         private static final String RENEW_TOKEN_PER_REQUEST = "RenewTokenPerRequest";
         // Allowed Scopes Config.
         private static final String ALLOWED_SCOPES_ELEMENT = "AllowedScopes";
+        // Allowed Default Requested Scopes Config.
+        private static final String DEFAULT_REQUESTED_SCOPES_ELEMENT = "DefaultRequestedScopes";
         private static final String SCOPES_ELEMENT = "Scope";
         // Filtered Claims For Introspection Response Config.
         private static final String FILTERED_CLAIMS = "FilteredClaims";
         private static final String FILTERED_CLAIM = "FilteredClaim";
+        private static final String GLOBAL_SCOPE_VALIDATORS = "GlobalScopeValidators";
+        private static final String ROLE_BASED_SCOPE_ISSUER_ENABLED = "RoleBasedScopeIssuer";
+        private static final String ENABLE = "Enable";
 
         private static final String DROP_UNREGISTERED_SCOPES = "DropUnregisteredScopes";
 
@@ -3738,6 +4386,8 @@ public class OAuthServerConfiguration {
         private static final String DEVICE_CODE_KEY_LENGTH = "KeyLength";
         private static final String DEVICE_CODE_EXPIRY_TIME = "ExpiryTime";
         private static final String DEVICE_CODE_POLLING_INTERVAL = "PollingInterval";
+        private static final String PAR = "PAR";
+        private static final String PAR_EXPIRY_TIME = "ExpiryTime";
         private static final String DEVICE_CODE_KEY_SET = "KeySet";
 
         // Allow Cross Tenant Introspection Config.
@@ -3749,6 +4399,17 @@ public class OAuthServerConfiguration {
 
         // FAPI Configurations
         private static final String FAPI = "FAPI";
+
+        private static final String SKIP_OIDC_CLAIMS_FOR_CLIENT_CREDENTIAL_GRANT =
+                "SkipOIDCClaimsForClientCredentialGrant";
+        private static final String SUPPORTED_TOKEN_ENDPOINT_SIGNING_ALGS = "SupportedTokenEndpointSigningAlgorithms";
+        private static final String SUPPORTED_TOKEN_ENDPOINT_SIGNING_ALG = "SupportedTokenEndpointSigningAlgorithm";
+        private static final String USE_LEGACY_SCOPES_AS_ALIAS_FOR_NEW_SCOPES = "UseLegacyScopesAsAliasForNewScopes";
+        private static final String USE_LEGACY_PERMISSION_ACCESS_FOR_USER_BASED_AUTH =
+                "UseLegacyPermissionAccessForUserBasedAuth";
+        private static final String SCOPE_METADATA_EXTENSION_IMPL = "ScopeMetadataService";
+        private static final String RESTRICTED_QUERY_PARAMETERS_ELEMENT = "RestrictedQueryParameters";
+        private static final String RESTRICTED_QUERY_PARAMETER_ELEMENT = "Parameter";
     }
 
 }

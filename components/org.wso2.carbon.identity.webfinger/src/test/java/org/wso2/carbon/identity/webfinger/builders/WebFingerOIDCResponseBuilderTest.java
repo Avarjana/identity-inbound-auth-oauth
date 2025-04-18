@@ -17,28 +17,32 @@
  */
 package org.wso2.carbon.identity.webfinger.builders;
 
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.testng.PowerMockTestCase;
+import org.mockito.MockedStatic;
+import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 import org.wso2.carbon.base.ServerConfigurationException;
 import org.wso2.carbon.identity.base.IdentityException;
+import org.wso2.carbon.identity.common.testng.WithCarbonHome;
+import org.wso2.carbon.identity.oauth.config.OAuthServerConfiguration;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
 import org.wso2.carbon.identity.oauth2.util.OAuth2Util;
 import org.wso2.carbon.identity.webfinger.WebFingerEndpointException;
 import org.wso2.carbon.identity.webfinger.WebFingerRequest;
 import org.wso2.carbon.identity.webfinger.WebFingerResponse;
 
-import static org.mockito.Matchers.any;
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
-import static org.powermock.api.mockito.PowerMockito.when;
+import java.lang.reflect.Field;
+
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.testng.Assert.assertEquals;
 
-@PrepareForTest({OAuth2Util.class})
 /**
  * Unit test coverage for WebFingerOIDCResponseBuilder class.
  */
-public class WebFingerOIDCResponseBuilderTest extends PowerMockTestCase {
+@WithCarbonHome
+public class WebFingerOIDCResponseBuilderTest {
 
     private WebFingerOIDCResponseBuilder webFingerOIDCResponseBuilder;
     private WebFingerRequest webFingerRequest;
@@ -50,6 +54,10 @@ public class WebFingerOIDCResponseBuilderTest extends PowerMockTestCase {
     private final String path = "/.well-known/webfinger";
     private final String scheme = "https";
     private final int port = 9443;
+
+    private OAuthServerConfiguration mockOAuthServerConfiguration;
+    private MockedStatic<OAuthServerConfiguration> oAuthServerConfiguration;
+    private MockedStatic<OAuth2Util> oAuth2Util;
 
     @BeforeMethod
     public void setUp() throws Exception {
@@ -63,13 +71,32 @@ public class WebFingerOIDCResponseBuilderTest extends PowerMockTestCase {
         webFingerRequest.setRel(rel);
         webFingerRequest.setTenant(tenant);
 
-        mockStatic(OAuth2Util.class);
+        mockOAuthServerConfiguration = mock(OAuthServerConfiguration.class);
+
+        oAuthServerConfiguration = mockStatic(OAuthServerConfiguration.class);
+        oAuthServerConfiguration.when(OAuthServerConfiguration::getInstance).thenReturn(mockOAuthServerConfiguration);
+        oAuth2Util = mockStatic(OAuth2Util.class);
+    }
+
+    @AfterMethod
+    public void tearDown() {
+
+        oAuth2Util.close();
+        oAuthServerConfiguration.close();
+    }
+
+    private void setPrivateStaticField(Class<?> clazz, String fieldName, Object newValue)
+            throws NoSuchFieldException, IllegalAccessException {
+
+        Field field = clazz.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(null, newValue);
     }
 
     @Test
     public void testBuildWebFingerResponse() throws Exception {
 
-        when(OAuth2Util.getIssuerLocation(any(String.class))).thenReturn(oidcDiscoveryUrl);
+        oAuth2Util.when(() -> OAuth2Util.getIssuerLocation(anyString())).thenReturn(oidcDiscoveryUrl);
         WebFingerResponse webFingerResponse = webFingerOIDCResponseBuilder.buildWebFingerResponse(webFingerRequest);
         assertEquals(webFingerResponse.getLinks().get(0).getRel(), rel, "rel is properly assigned");
         assertEquals(webFingerResponse.getLinks().get(0).getHref(), oidcDiscoveryUrl,
@@ -82,7 +109,7 @@ public class WebFingerOIDCResponseBuilderTest extends PowerMockTestCase {
     public void testBuildWebFingerException() throws WebFingerEndpointException, ServerConfigurationException,
             IdentityException {
 
-        when(OAuth2Util.getIssuerLocation(any(String.class))).thenThrow
+        oAuth2Util.when(() -> OAuth2Util.getIssuerLocation(anyString())).thenThrow
                 (new IdentityOAuth2Exception("Error"));
         webFingerOIDCResponseBuilder.buildWebFingerResponse(webFingerRequest);
     }

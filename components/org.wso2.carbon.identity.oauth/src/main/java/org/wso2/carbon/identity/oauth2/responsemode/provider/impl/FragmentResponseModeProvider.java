@@ -19,11 +19,18 @@
 package org.wso2.carbon.identity.oauth2.responsemode.provider.impl;
 
 import org.apache.commons.lang.StringUtils;
-import org.wso2.carbon.identity.application.authentication.framework.util.FrameworkUtils;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.wso2.carbon.identity.oauth.common.OAuthConstants;
+import org.wso2.carbon.identity.oauth.rar.model.AuthorizationDetails;
+import org.wso2.carbon.identity.oauth.rar.util.AuthorizationDetailsConstants;
+import org.wso2.carbon.identity.oauth2.rar.util.AuthorizationDetailsUtils;
 import org.wso2.carbon.identity.oauth2.responsemode.provider.AbstractResponseModeProvider;
 import org.wso2.carbon.identity.oauth2.responsemode.provider.AuthorizationResponseDTO;
 
+import java.io.UnsupportedEncodingException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -31,6 +38,8 @@ import java.util.List;
  * This class is used when response_mode = fragment.
  */
 public class FragmentResponseModeProvider extends AbstractResponseModeProvider {
+
+    private static final Log log = LogFactory.getLog(FragmentResponseModeProvider.class);
 
     private static final String RESPONSE_MODE = OAuthConstants.ResponseModes.FRAGMENT;
 
@@ -55,44 +64,53 @@ public class FragmentResponseModeProvider extends AbstractResponseModeProvider {
             long validityPeriod = authorizationResponseDTO.getSuccessResponseDTO().getValidityPeriod();
             String scope = authorizationResponseDTO.getSuccessResponseDTO().getScope();
             String authenticatedIdPs = authorizationResponseDTO.getAuthenticatedIDPs();
-            List<String> queryParams = new ArrayList<>();
+            String subjectToken = authorizationResponseDTO.getSuccessResponseDTO().getSubjectToken();
+            final AuthorizationDetails authorizationDetails = authorizationResponseDTO.getSuccessResponseDTO()
+                    .getAuthorizationDetails();
+            List<String> params = new ArrayList<>();
             if (accessToken != null) {
-                queryParams.add(OAuthConstants.ACCESS_TOKEN_RESPONSE_PARAM + "=" + accessToken);
-                queryParams.add(OAuthConstants.EXPIRES_IN + "=" + validityPeriod);
+                appendParam(params, OAuthConstants.ACCESS_TOKEN_RESPONSE_PARAM, accessToken);
+                appendParam(params, OAuthConstants.EXPIRES_IN, String.valueOf(validityPeriod));
             }
 
             if (tokenType != null) {
-                queryParams.add(OAuthConstants.TOKEN_TYPE + "=" + tokenType);
+                appendParam(params, OAuthConstants.TOKEN_TYPE, tokenType);
             }
 
             if (idToken != null) {
-                queryParams.add(OAuthConstants.ID_TOKEN + "=" + idToken);
+                appendParam(params, OAuthConstants.ID_TOKEN, idToken);
             }
 
             if (code != null) {
-                queryParams.add(OAuthConstants.CODE + "=" + code);
+                appendParam(params, OAuthConstants.CODE, code);
             }
 
             if (authenticatedIdPs != null && !authenticatedIdPs.isEmpty()) {
-                queryParams.add(OAuthConstants.AUTHENTICATED_IDPS + "=" + authenticatedIdPs);
+                appendParam(params, OAuthConstants.AUTHENTICATED_IDPS, authenticatedIdPs);
             }
 
             if (sessionState != null) {
-                queryParams.add(OAuthConstants.SESSION_STATE + "=" + sessionState);
+                appendParam(params, OAuthConstants.SESSION_STATE, sessionState);
             }
 
             if (state != null) {
-                queryParams.add(OAuthConstants.STATE + "=" + state);
+                appendParam(params, OAuthConstants.STATE, state);
             }
 
             if (scope != null) {
-                queryParams.add(OAuthConstants.SCOPE + "=" + scope);
+                appendParam(params, OAuthConstants.SCOPE, scope);
             }
 
-            redirectUrl = FrameworkUtils.appendQueryParamsStringToUrl(redirectUrl,
-                    String.join("&", queryParams));
+            if (StringUtils.isNotBlank(subjectToken)) {
+                appendParam(params, OAuthConstants.SUBJECT_TOKEN, subjectToken);
+            }
 
-            redirectUrl = redirectUrl.replace("?", "#");
+            if (AuthorizationDetailsUtils.isRichAuthorizationRequest(authorizationDetails)) {
+                params.add(AuthorizationDetailsConstants.AUTHORIZATION_DETAILS + "=" +
+                        AuthorizationDetailsUtils.getUrlEncodedAuthorizationDetails(authorizationDetails));
+            }
+
+            redirectUrl += "#" + String.join("&", params);
 
         } else {
             redirectUrl += "#" +
@@ -101,13 +119,12 @@ public class FragmentResponseModeProvider extends AbstractResponseModeProvider {
                     authorizationResponseDTO.getErrorResponseDTO().getErrorDescription()
                             .replace(" ", "+");
 
-            if (StringUtils.isNotBlank(authorizationResponseDTO.getSessionState())) {
-                redirectUrl += "&" + OAuthConstants.SESSION_STATE + "=" +
-                        authorizationResponseDTO.getSessionState();
+            if (StringUtils.isNotBlank(sessionState)) {
+                redirectUrl += "&" + OAuthConstants.SESSION_STATE + "=" + encodeValue(sessionState);
             }
 
             if (StringUtils.isNotBlank(state)) {
-                redirectUrl += "&" + OAuthConstants.STATE + "=" + state;
+                redirectUrl += "&" + OAuthConstants.STATE + "=" + encodeValue(state);
             }
         }
         authorizationResponseDTO.setRedirectUrl(redirectUrl);
@@ -124,5 +141,22 @@ public class FragmentResponseModeProvider extends AbstractResponseModeProvider {
     public AuthResponseType getAuthResponseType() {
 
         return AuthResponseType.REDIRECTION;
+    }
+
+    private void appendParam(List<String> params, String key, String value) {
+
+        String encodedValue = encodeValue(value);
+        params.add(key + "=" + encodedValue);
+    }
+
+    private String encodeValue(String value) {
+
+        try {
+            return URLEncoder.encode(value, StandardCharsets.UTF_8.toString());
+        } catch (UnsupportedEncodingException e) {
+            // This exception will not be thrown as UTF-8 is always supported.
+            log.error("Error occurred while encoding the value: " + value, e);
+            return null;
+        }
     }
 }

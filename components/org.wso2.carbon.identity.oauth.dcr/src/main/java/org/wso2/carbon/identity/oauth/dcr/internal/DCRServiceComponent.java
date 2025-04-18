@@ -29,14 +29,21 @@ import org.wso2.carbon.identity.application.authentication.framework.inbound.Htt
 import org.wso2.carbon.identity.application.authentication.framework.inbound.HttpIdentityResponseFactory;
 import org.wso2.carbon.identity.application.authentication.framework.inbound.IdentityProcessor;
 import org.wso2.carbon.identity.application.mgt.ApplicationManagementService;
+import org.wso2.carbon.identity.configuration.mgt.core.ConfigurationManager;
+import org.wso2.carbon.identity.oauth.common.token.bindings.TokenBinderInfo;
+import org.wso2.carbon.identity.oauth.dcr.DCRConfigurationMgtService;
+import org.wso2.carbon.identity.oauth.dcr.DCRConfigurationMgtServiceImpl;
 import org.wso2.carbon.identity.oauth.dcr.factory.HttpRegistrationResponseFactory;
 import org.wso2.carbon.identity.oauth.dcr.factory.HttpUnregistrationResponseFactory;
 import org.wso2.carbon.identity.oauth.dcr.factory.RegistrationRequestFactory;
 import org.wso2.carbon.identity.oauth.dcr.factory.UnregistrationRequestFactory;
+import org.wso2.carbon.identity.oauth.dcr.handler.AdditionalAttributeFilter;
 import org.wso2.carbon.identity.oauth.dcr.handler.RegistrationHandler;
 import org.wso2.carbon.identity.oauth.dcr.handler.UnRegistrationHandler;
 import org.wso2.carbon.identity.oauth.dcr.processor.DCRProcessor;
 import org.wso2.carbon.identity.oauth.dcr.service.DCRMService;
+import org.wso2.carbon.identity.oauth2.token.bindings.TokenBinder;
+import org.wso2.carbon.identity.organization.management.service.OrganizationManager;
 
 /**
  * OAuth DCRM service component.
@@ -47,7 +54,6 @@ import org.wso2.carbon.identity.oauth.dcr.service.DCRMService;
         name = "identity.oauth.dcr",
         immediate = true
 )
-@Deprecated
 public class DCRServiceComponent {
 
     private static final Log log = LogFactory.getLog(DCRServiceComponent.class);
@@ -78,6 +84,8 @@ public class DCRServiceComponent {
                     new UnRegistrationHandler(), null);
             componentContext.getBundleContext().registerService(DCRMService.class.getName(),
                     new DCRMService(), null);
+            componentContext.getBundleContext().registerService(DCRConfigurationMgtService.class.getName(),
+                    new DCRConfigurationMgtServiceImpl(), null);
         } catch (Throwable e) {
             log.error("Error occurred while activating DCRServiceComponent", e);
         }
@@ -194,4 +202,91 @@ public class DCRServiceComponent {
         DCRDataHolder.getInstance().setApplicationManagementService(null);
     }
 
+    @Reference(name = "token.binding.service",
+            service = TokenBinderInfo.class,
+            cardinality = ReferenceCardinality.MULTIPLE,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unsetTokenBinderInfo")
+    protected void setTokenBinderInfo(TokenBinderInfo tokenBinderInfo) {
+
+        if (log.isDebugEnabled()) {
+            log.debug("Setting the token binder for: " + tokenBinderInfo.getBindingType());
+        }
+        if (tokenBinderInfo instanceof TokenBinder) {
+            DCRDataHolder.getInstance().addTokenBinder((TokenBinder) tokenBinderInfo);
+        }
+    }
+    protected void unsetTokenBinderInfo(TokenBinderInfo tokenBinderInfo) {
+
+        if (log.isDebugEnabled()) {
+            log.debug("Un-setting the token binder for: " + tokenBinderInfo.getBindingType());
+        }
+        if (tokenBinderInfo instanceof TokenBinder) {
+            DCRDataHolder.getInstance().removeTokenBinder((TokenBinder) tokenBinderInfo);
+        }
+    }
+
+    /**
+     * Set the ConfigurationManager.
+     *
+     * @param configurationManager The {@code ConfigurationManager} instance.
+     */
+    @Reference(
+            name = "resource.configuration.manager",
+            service = ConfigurationManager.class,
+            cardinality = ReferenceCardinality.MANDATORY,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unregisterConfigurationManager"
+    )
+    protected void registerConfigurationManager(ConfigurationManager configurationManager) {
+
+        log.debug("Registering the ConfigurationManager in DCR Service Component.");
+        DCRDataHolder.getInstance().setConfigurationManager(configurationManager);
+    }
+
+
+    /**
+     * Unset the ConfigurationManager.
+     *
+     * @param configurationManager The {@code ConfigurationManager} instance.
+     */
+    protected void unregisterConfigurationManager(ConfigurationManager configurationManager) {
+
+        log.debug("Unregistering the ConfigurationManager in DCR Service Component.");
+        DCRDataHolder.getInstance().setConfigurationManager(null);
+    }
+
+    @Reference(
+            name = "organization.service",
+            service = OrganizationManager.class,
+            cardinality = ReferenceCardinality.MANDATORY,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unsetOrganizationManager"
+    )
+    protected void setOrganizationManager(OrganizationManager organizationManager) {
+
+        DCRDataHolder.getInstance().setOrganizationManager(organizationManager);
+        log.debug("Set the organization management service.");
+    }
+
+    protected void unsetOrganizationManager(OrganizationManager organizationManager) {
+
+        DCRDataHolder.getInstance().setOrganizationManager(null);
+        log.debug("Unset organization management service.");
+    }
+
+    @Reference(name = "identity.oauth.dcr.attribute.filter",
+            service = AdditionalAttributeFilter.class,
+            cardinality = ReferenceCardinality.MULTIPLE,
+            policy = ReferencePolicy.DYNAMIC,
+            unbind = "unsetAdditionalAttributeFilter")
+    protected void setAdditionalAttributeFilter(AdditionalAttributeFilter additionalAttributeFilter) {
+
+        DCRDataHolder.getInstance().setAdditionalAttributeFilter(additionalAttributeFilter);
+    }
+
+    protected void unsetAdditionalAttributeFilter(AdditionalAttributeFilter tokenBinderInfo) {
+
+        DCRDataHolder.getInstance().setAdditionalAttributeFilter(null);
+    }
 }

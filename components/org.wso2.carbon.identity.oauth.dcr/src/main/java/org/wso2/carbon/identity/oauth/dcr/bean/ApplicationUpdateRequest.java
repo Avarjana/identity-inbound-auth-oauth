@@ -21,6 +21,7 @@ package org.wso2.carbon.identity.oauth.dcr.bean;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * This object contains the context related to OAuth application update request.
@@ -35,6 +36,7 @@ public class ApplicationUpdateRequest implements Serializable {
     private String tokenType = null;
     private String backchannelLogoutUri = null;
     private String extApplicationDisplayName = null;
+    private String extApplicationVersion = null;
     private String extApplicationOwner = null;
     private Long extApplicationTokenLifetime = null;
     private Long extUserTokenLifetime = null;
@@ -43,6 +45,48 @@ public class ApplicationUpdateRequest implements Serializable {
     private boolean extPkceMandatory = false;
     private boolean extPkceSupportPlain = false;
     private boolean extPublicClient = false;
+    private String extTokenType = null;
+    private String jwksURI = null;
+    private String softwareStatement;
+    private String tokenEndpointAuthMethod;
+    private Boolean tokenEndpointAllowReusePvtKeyJwt;
+    private String tokenEndpointAuthSignatureAlgorithm;
+    private String sectorIdentifierURI;
+    private String idTokenSignatureAlgorithm;
+    private String idTokenEncryptionAlgorithm;
+    private String idTokenEncryptionMethod;
+    private String requestObjectSignatureAlgorithm;
+    private String tlsClientAuthSubjectDN;
+    private boolean requirePushedAuthorizationRequests;
+    private boolean tlsClientCertificateBoundAccessTokens;
+    private boolean requireSignedRequestObject;
+    private String subjectType;
+    private Boolean useClientIdAsSubClaimForAppTokens;
+    private Boolean omitUsernameInIntrospectionRespForAppTokens;
+    private String requestObjectEncryptionAlgorithm;
+    private String requestObjectEncryptionMethod;
+    private Map<String, Object> additionalAttributes;
+    private String extAllowedAudience;
+
+    public void setAdditionalAttributes(Map<String, Object> additionalAttributes) {
+
+        this.additionalAttributes = additionalAttributes;
+    }
+
+    public Map<String, Object> getAdditionalAttributes() {
+
+        return additionalAttributes;
+    }
+
+    public String getExtAllowedAudience() {
+
+        return extAllowedAudience;
+    }
+
+    public void setExtAllowedAudience(String extAllowedAudience) {
+
+        this.extAllowedAudience = extAllowedAudience;
+    }
 
     public List<String> getRedirectUris() {
 
@@ -110,6 +154,24 @@ public class ApplicationUpdateRequest implements Serializable {
     public void setExtApplicationDisplayName(String extApplicationDisplayName) {
 
         this.extApplicationDisplayName = extApplicationDisplayName;
+    }
+
+    /**
+     * Get the external parameter application version.
+     * @return external parameter application version.
+     */
+    public String getExtApplicationVersion() {
+
+        return extApplicationVersion;
+    }
+
+    /**
+     * Set the external parameter application version.
+     * @param extApplicationVersion external parameter application version.
+     */
+    public void setExtApplicationVersion(String extApplicationVersion) {
+
+        this.extApplicationVersion = extApplicationVersion;
     }
 
     /**
@@ -247,6 +309,16 @@ public class ApplicationUpdateRequest implements Serializable {
         return extPublicClient;
     }
 
+    public String getExtTokenType() {
+
+        return extTokenType;
+    }
+
+    public void setExtTokenType(String tokenType) {
+
+        this.extTokenType = tokenType;
+    }
+
     /**
      * Set whether the client is a public client or not.
      * @param extPublicClient whether the client is a public client or not.
@@ -255,4 +327,174 @@ public class ApplicationUpdateRequest implements Serializable {
 
         this.extPublicClient = extPublicClient;
     }
+
+    public String getTokenEndpointAuthMethod() {
+
+        return tokenEndpointAuthMethod;
+    }
+
+    public void setTokenEndpointAuthMethod(String tokenEndpointAuthMethod) {
+
+        this.tokenEndpointAuthMethod = tokenEndpointAuthMethod;
+    }
+
+    public Boolean isTokenEndpointAllowReusePvtKeyJwt() {
+
+        return tokenEndpointAllowReusePvtKeyJwt;
+    }
+
+    public void setTokenEndpointAllowReusePvtKeyJwt(Boolean tokenEndpointAllowReusePvtKeyJwt) {
+
+        this.tokenEndpointAllowReusePvtKeyJwt = tokenEndpointAllowReusePvtKeyJwt;
+    }
+
+    public String getTokenEndpointAuthSignatureAlgorithm() {
+
+        return tokenEndpointAuthSignatureAlgorithm;
+    }
+
+    public void setTokenEndpointAuthSignatureAlgorithm(String tokenEndpointAuthSignatureAlgorithm) {
+
+        this.tokenEndpointAuthSignatureAlgorithm = tokenEndpointAuthSignatureAlgorithm;
+    }
+
+    public String getSectorIdentifierURI() {
+
+        return sectorIdentifierURI;
+    }
+
+    public void setSectorIdentifierURI(String sectorIdentifierURI) {
+
+        this.sectorIdentifierURI = sectorIdentifierURI;
+    }
+
+    public String getRequestObjectSignatureAlgorithm() {
+
+        return requestObjectSignatureAlgorithm;
+    }
+
+    public void setRequestObjectSignatureAlgorithm(String requestObjectSignatureAlgorithm) {
+
+        this.requestObjectSignatureAlgorithm = requestObjectSignatureAlgorithm;
+    }
+
+    public String getTlsClientAuthSubjectDN() {
+
+        return tlsClientAuthSubjectDN;
+    }
+
+    public void setTlsClientAuthSubjectDN(String tlsClientAuthSubjectDN) {
+
+        this.tlsClientAuthSubjectDN = tlsClientAuthSubjectDN;
+    }
+    public String getSubjectType() {
+
+        return subjectType;
+    }
+
+    public void setSubjectType(String subjectType) {
+
+        this.subjectType = subjectType;
+    }
+
+    public String getRequestObjectEncryptionAlgorithm() {
+
+        return requestObjectEncryptionAlgorithm;
+    }
+
+    public void setRequestObjectEncryptionAlgorithm(String requestObjectEncryptionAlgorithm) {
+
+        this.requestObjectEncryptionAlgorithm = requestObjectEncryptionAlgorithm;
+    }
+
+    public String getRequestObjectEncryptionMethod() {
+
+        return requestObjectEncryptionMethod;
+    }
+
+    public void setRequestObjectEncryptionMethod(String requestObjectEncryptionMethod) {
+
+        this.requestObjectEncryptionMethod = requestObjectEncryptionMethod;
+    }
+
+    public String getIdTokenSignatureAlgorithm() {
+
+        return idTokenSignatureAlgorithm;
+    }
+
+    public void setIdTokenSignatureAlgorithm(String idTokenSignatureAlgorithm) {
+
+        this.idTokenSignatureAlgorithm = idTokenSignatureAlgorithm;
+    }
+
+    public String getIdTokenEncryptionAlgorithm() {
+
+        return idTokenEncryptionAlgorithm;
+    }
+
+    public void setIdTokenEncryptionAlgorithm(String idTokenEncryptionAlgorithm) {
+
+        this.idTokenEncryptionAlgorithm = idTokenEncryptionAlgorithm;
+    }
+
+    public String getIdTokenEncryptionMethod() {
+
+        return idTokenEncryptionMethod;
+    }
+
+    public void setIdTokenEncryptionMethod(String idTokenEncryptionMethod) {
+
+        this.idTokenEncryptionMethod = idTokenEncryptionMethod;
+    }
+
+    public boolean isRequirePushedAuthorizationRequests() {
+
+        return requirePushedAuthorizationRequests;
+    }
+
+    public void setRequirePushedAuthorizationRequests(boolean requirePushedAuthorizationRequests) {
+
+        this.requirePushedAuthorizationRequests = requirePushedAuthorizationRequests;
+    }
+
+    public boolean isTlsClientCertificateBoundAccessTokens() {
+
+        return tlsClientCertificateBoundAccessTokens;
+    }
+
+    public void setTlsClientCertificateBoundAccessTokens(boolean tlsClientCertificateBoundAccessTokens) {
+
+        this.tlsClientCertificateBoundAccessTokens = tlsClientCertificateBoundAccessTokens;
+    }
+
+    public boolean isRequireSignedRequestObject() {
+
+        return requireSignedRequestObject;
+    }
+
+    public void setRequireSignedRequestObject(boolean requireSignedRequestObject) {
+
+        this.requireSignedRequestObject = requireSignedRequestObject;
+    }
+
+    public String getSoftwareStatement() {
+
+        return softwareStatement;
+    }
+
+    public void setSoftwareStatement(String softwareStatement) {
+
+        this.softwareStatement = softwareStatement;
+    }
+
+    public String getJwksURI() {
+
+        return jwksURI;
+    }
+
+    public void setJwksURI(String jwksURI) {
+
+        this.jwksURI = jwksURI;
+    }
+
 }

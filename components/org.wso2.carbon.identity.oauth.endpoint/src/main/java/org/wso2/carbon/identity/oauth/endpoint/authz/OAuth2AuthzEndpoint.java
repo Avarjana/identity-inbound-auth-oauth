@@ -1,7 +1,7 @@
 /*
- * Copyright (c) 2013, WSO2 LLC. (http://www.wso2.org) All Rights Reserved.
+ * Copyright (c) 2013-2024, WSO2 LLC. (http://www.wso2.com).
  *
- * WSO2 Inc. licenses this file to you under the Apache License,
+ * WSO2 LLC. licenses this file to you under the Apache License,
  * Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,8 +15,12 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+
 package org.wso2.carbon.identity.oauth.endpoint.authz;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 import com.nimbusds.jwt.SignedJWT;
@@ -27,6 +31,7 @@ import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.cxf.interceptor.InInterceptors;
 import org.apache.http.NameValuePair;
 import org.apache.http.client.utils.URIBuilder;
 import org.apache.oltu.oauth2.as.request.OAuthAuthzRequest;
@@ -39,33 +44,47 @@ import org.apache.oltu.oauth2.common.message.OAuthResponse;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.owasp.encoder.Encode;
+import org.wso2.carbon.identity.application.authentication.framework.AuthenticationService;
 import org.wso2.carbon.identity.application.authentication.framework.AuthenticatorFlowStatus;
 import org.wso2.carbon.identity.application.authentication.framework.CommonAuthenticationHandler;
 import org.wso2.carbon.identity.application.authentication.framework.cache.AuthenticationResultCacheEntry;
+import org.wso2.carbon.identity.application.authentication.framework.config.model.AuthenticatorConfig;
 import org.wso2.carbon.identity.application.authentication.framework.config.model.graph.js.JsLogger;
 import org.wso2.carbon.identity.application.authentication.framework.context.AuthHistory;
 import org.wso2.carbon.identity.application.authentication.framework.context.SessionContext;
 import org.wso2.carbon.identity.application.authentication.framework.exception.UserIdNotFoundException;
+import org.wso2.carbon.identity.application.authentication.framework.exception.auth.service.AuthServiceClientException;
+import org.wso2.carbon.identity.application.authentication.framework.exception.auth.service.AuthServiceException;
 import org.wso2.carbon.identity.application.authentication.framework.handler.request.impl.consent.ClaimMetaData;
 import org.wso2.carbon.identity.application.authentication.framework.handler.request.impl.consent.ConsentClaimsData;
 import org.wso2.carbon.identity.application.authentication.framework.handler.request.impl.consent.exception.SSOConsentServiceException;
+import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedIdPData;
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticationResult;
 import org.wso2.carbon.identity.application.authentication.framework.model.CommonAuthRequestWrapper;
 import org.wso2.carbon.identity.application.authentication.framework.model.CommonAuthResponseWrapper;
+import org.wso2.carbon.identity.application.authentication.framework.model.FederatedToken;
+import org.wso2.carbon.identity.application.authentication.framework.model.auth.service.AuthServiceRequest;
+import org.wso2.carbon.identity.application.authentication.framework.model.auth.service.AuthServiceResponse;
 import org.wso2.carbon.identity.application.authentication.framework.util.FrameworkConstants;
 import org.wso2.carbon.identity.application.authentication.framework.util.FrameworkUtils;
+import org.wso2.carbon.identity.application.authentication.framework.util.auth.service.AuthServiceConstants;
 import org.wso2.carbon.identity.application.common.model.Claim;
 import org.wso2.carbon.identity.application.common.model.ClaimMapping;
 import org.wso2.carbon.identity.application.common.model.ServiceProvider;
 import org.wso2.carbon.identity.application.common.model.ServiceProviderProperty;
 import org.wso2.carbon.identity.base.IdentityConstants;
+import org.wso2.carbon.identity.base.IdentityException;
+import org.wso2.carbon.identity.central.log.mgt.utils.LogConstants;
 import org.wso2.carbon.identity.central.log.mgt.utils.LoggerUtils;
 import org.wso2.carbon.identity.claim.metadata.mgt.ClaimMetadataHandler;
 import org.wso2.carbon.identity.claim.metadata.mgt.exception.ClaimMetadataException;
 import org.wso2.carbon.identity.claim.metadata.mgt.model.ExternalClaim;
+import org.wso2.carbon.identity.client.attestation.filter.ClientAttestationProxy;
+import org.wso2.carbon.identity.client.attestation.mgt.model.ClientAttestationContext;
 import org.wso2.carbon.identity.core.ServiceURLBuilder;
 import org.wso2.carbon.identity.core.URLBuilderException;
+import org.wso2.carbon.identity.core.model.UserAgent;
 import org.wso2.carbon.identity.core.util.IdentityTenantUtil;
 import org.wso2.carbon.identity.core.util.IdentityUtil;
 import org.wso2.carbon.identity.oauth.IdentityOAuthAdminException;
@@ -75,6 +94,7 @@ import org.wso2.carbon.identity.oauth.cache.AuthorizationGrantCacheKey;
 import org.wso2.carbon.identity.oauth.cache.SessionDataCache;
 import org.wso2.carbon.identity.oauth.cache.SessionDataCacheEntry;
 import org.wso2.carbon.identity.oauth.cache.SessionDataCacheKey;
+import org.wso2.carbon.identity.oauth.client.authn.filter.OAuthClientAuthenticatorProxy;
 import org.wso2.carbon.identity.oauth.common.OAuth2ErrorCodes;
 import org.wso2.carbon.identity.oauth.common.OAuthConstants;
 import org.wso2.carbon.identity.oauth.common.exception.InvalidOAuthClientException;
@@ -82,50 +102,64 @@ import org.wso2.carbon.identity.oauth.config.OAuthServerConfiguration;
 import org.wso2.carbon.identity.oauth.dao.OAuthAppDO;
 import org.wso2.carbon.identity.oauth.dto.OAuthErrorDTO;
 import org.wso2.carbon.identity.oauth.endpoint.OAuthRequestWrapper;
+import org.wso2.carbon.identity.oauth.endpoint.api.auth.ApiAuthnHandler;
+import org.wso2.carbon.identity.oauth.endpoint.api.auth.ApiAuthnUtils;
+import org.wso2.carbon.identity.oauth.endpoint.api.auth.model.AuthResponse;
+import org.wso2.carbon.identity.oauth.endpoint.api.auth.model.SuccessCompleteAuthResponse;
 import org.wso2.carbon.identity.oauth.endpoint.exception.ConsentHandlingFailedException;
 import org.wso2.carbon.identity.oauth.endpoint.exception.InvalidRequestException;
 import org.wso2.carbon.identity.oauth.endpoint.exception.InvalidRequestParentException;
 import org.wso2.carbon.identity.oauth.endpoint.message.OAuthMessage;
 import org.wso2.carbon.identity.oauth.endpoint.util.EndpointUtil;
 import org.wso2.carbon.identity.oauth.endpoint.util.OpenIDConnectUserRPStore;
+import org.wso2.carbon.identity.oauth.endpoint.util.factory.DeviceServiceFactory;
+import org.wso2.carbon.identity.oauth.endpoint.util.factory.OpenIDConnectClaimFilterFactory;
 import org.wso2.carbon.identity.oauth.extension.engine.JSEngine;
 import org.wso2.carbon.identity.oauth.extension.utils.EngineUtils;
+import org.wso2.carbon.identity.oauth.rar.exception.AuthorizationDetailsProcessingException;
+import org.wso2.carbon.identity.oauth.rar.model.AuthorizationDetails;
+import org.wso2.carbon.identity.oauth.rar.util.AuthorizationDetailsConstants;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2ClientException;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2ScopeException;
+import org.wso2.carbon.identity.oauth2.IdentityOAuth2ServerException;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2UnauthorizedScopeException;
 import org.wso2.carbon.identity.oauth2.OAuth2Service;
 import org.wso2.carbon.identity.oauth2.RequestObjectException;
 import org.wso2.carbon.identity.oauth2.authz.OAuthAuthzReqMessageContext;
+import org.wso2.carbon.identity.oauth2.bean.OAuthClientAuthnContext;
+import org.wso2.carbon.identity.oauth2.device.cache.DeviceAuthorizationGrantCache;
+import org.wso2.carbon.identity.oauth2.device.cache.DeviceAuthorizationGrantCacheEntry;
+import org.wso2.carbon.identity.oauth2.device.cache.DeviceAuthorizationGrantCacheKey;
+import org.wso2.carbon.identity.oauth2.device.constants.Constants;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2AuthorizeReqDTO;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2AuthorizeRespDTO;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2ClientValidationResponseDTO;
 import org.wso2.carbon.identity.oauth2.internal.OAuth2ServiceComponentHolder;
 import org.wso2.carbon.identity.oauth2.model.AccessTokenExtendedAttributes;
-import org.wso2.carbon.identity.oauth2.model.CarbonOAuthAuthzRequest;
+import org.wso2.carbon.identity.oauth2.model.FederatedTokenDO;
 import org.wso2.carbon.identity.oauth2.model.HttpRequestHeaderHandler;
 import org.wso2.carbon.identity.oauth2.model.OAuth2Parameters;
+import org.wso2.carbon.identity.oauth2.rar.util.AuthorizationDetailsUtils;
 import org.wso2.carbon.identity.oauth2.responsemode.provider.AuthorizationResponseDTO;
 import org.wso2.carbon.identity.oauth2.responsemode.provider.ResponseModeProvider;
-import org.wso2.carbon.identity.oauth2.scopeservice.ScopeMetadataService;
 import org.wso2.carbon.identity.oauth2.token.bindings.TokenBinder;
 import org.wso2.carbon.identity.oauth2.util.OAuth2Util;
+import org.wso2.carbon.identity.oauth2.util.RequestUtil;
 import org.wso2.carbon.identity.oidc.session.OIDCSessionState;
 import org.wso2.carbon.identity.oidc.session.util.OIDCSessionManagementUtil;
 import org.wso2.carbon.identity.openidconnect.OIDCConstants;
 import org.wso2.carbon.identity.openidconnect.OIDCRequestObjectUtil;
-import org.wso2.carbon.identity.openidconnect.OpenIDConnectClaimFilterImpl;
 import org.wso2.carbon.identity.openidconnect.model.RequestObject;
 import org.wso2.carbon.identity.openidconnect.model.RequestedClaim;
-import org.wso2.carbon.registry.core.utils.UUIDGenerator;
 import org.wso2.carbon.utils.CarbonUtils;
+import org.wso2.carbon.utils.DiagnosticLog;
 
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -147,6 +181,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import javax.servlet.RequestDispatcher;
 import javax.servlet.ServletContext;
@@ -170,20 +205,25 @@ import static org.wso2.carbon.identity.application.authentication.endpoint.util.
 import static org.wso2.carbon.identity.application.authentication.endpoint.util.Constants.REQUESTED_CLAIMS;
 import static org.wso2.carbon.identity.application.authentication.endpoint.util.Constants.USER_CLAIMS_CONSENT_ONLY;
 import static org.wso2.carbon.identity.application.authentication.framework.util.FrameworkConstants.REQUEST_PARAM_SP;
-import static org.wso2.carbon.identity.application.authentication.framework.util.FrameworkConstants.RequestParams.TENANT_DOMAIN;
+import static org.wso2.carbon.identity.client.attestation.mgt.utils.Constants.CLIENT_ATTESTATION_CONTEXT;
+import static org.wso2.carbon.identity.oauth.common.OAuthConstants.LogConstants.InputKeys.RESPONSE_TYPE;
 import static org.wso2.carbon.identity.oauth.common.OAuthConstants.OAuth20Params.CLIENT_ID;
 import static org.wso2.carbon.identity.oauth.common.OAuthConstants.OAuth20Params.REDIRECT_URI;
+import static org.wso2.carbon.identity.oauth.common.OAuthConstants.OAuth20Params.USERINFO;
 import static org.wso2.carbon.identity.oauth.endpoint.state.OAuthAuthorizeState.AUTHENTICATION_RESPONSE;
 import static org.wso2.carbon.identity.oauth.endpoint.state.OAuthAuthorizeState.INITIAL_REQUEST;
 import static org.wso2.carbon.identity.oauth.endpoint.state.OAuthAuthorizeState.PASSTHROUGH_TO_COMMONAUTH;
 import static org.wso2.carbon.identity.oauth.endpoint.state.OAuthAuthorizeState.USER_CONSENT_RESPONSE;
 import static org.wso2.carbon.identity.oauth.endpoint.util.EndpointUtil.getErrorPageURL;
 import static org.wso2.carbon.identity.oauth.endpoint.util.EndpointUtil.getLoginPageURL;
-import static org.wso2.carbon.identity.oauth.endpoint.util.EndpointUtil.getOAuth2Service;
-import static org.wso2.carbon.identity.oauth.endpoint.util.EndpointUtil.getOAuthServerConfiguration;
-import static org.wso2.carbon.identity.oauth.endpoint.util.EndpointUtil.getSSOConsentService;
+import static org.wso2.carbon.identity.oauth.endpoint.util.EndpointUtil.getOAuthAuthzRequest;
 import static org.wso2.carbon.identity.oauth.endpoint.util.EndpointUtil.retrieveStateForErrorURL;
 import static org.wso2.carbon.identity.oauth.endpoint.util.EndpointUtil.validateParams;
+import static org.wso2.carbon.identity.oauth.endpoint.util.factory.OAuth2ServiceFactory.getOAuth2Service;
+import static org.wso2.carbon.identity.oauth.endpoint.util.factory.OAuthServerConfigurationFactory.getOAuthServerConfiguration;
+import static org.wso2.carbon.identity.oauth.endpoint.util.factory.RequestObjectServiceFactory.getRequestObjectService;
+import static org.wso2.carbon.identity.oauth.endpoint.util.factory.SSOConsentServiceFactory.getSSOConsentService;
+import static org.wso2.carbon.identity.oauth2.OAuth2Constants.TokenBinderType.CLIENT_REQUEST;
 import static org.wso2.carbon.identity.oauth2.util.OAuth2Util.ACCESS_TOKEN_JS_OBJECT;
 import static org.wso2.carbon.identity.oauth2.util.OAuth2Util.DYNAMIC_TOKEN_DATA_FUNCTION;
 import static org.wso2.carbon.identity.openidconnect.model.Constants.AUTH_TIME;
@@ -194,12 +234,14 @@ import static org.wso2.carbon.identity.openidconnect.model.Constants.MAX_AGE;
 import static org.wso2.carbon.identity.openidconnect.model.Constants.NONCE;
 import static org.wso2.carbon.identity.openidconnect.model.Constants.PROMPT;
 import static org.wso2.carbon.identity.openidconnect.model.Constants.SCOPE;
+import static org.wso2.carbon.identity.openidconnect.model.Constants.SERVICE_PROVIDER_ID;
 import static org.wso2.carbon.identity.openidconnect.model.Constants.STATE;
 
 /**
  * Rest implementation of OAuth2 authorize endpoint.
  */
 @Path("/authorize")
+@InInterceptors(classes = {OAuthClientAuthenticatorProxy.class, ClientAttestationProxy.class})
 public class OAuth2AuthzEndpoint {
 
     private static final Log log = LogFactory.getLog(OAuth2AuthzEndpoint.class);
@@ -232,41 +274,24 @@ public class OAuth2AuthzEndpoint {
 
     private static final String PARAMETERS = "params";
     private static final String FORM_POST_REDIRECT_URI = "redirectURI";
+    private static final String SERVICE_PROVIDER = "serviceProvider";
+    private static final String TENANT_DOMAIN = "tenantDomain";
+    private static final String USER_TENANT_DOMAIN = "userTenantDomain";
     private static final String AUTHENTICATION_ENDPOINT = "/authenticationendpoint";
     private static final String OAUTH_RESPONSE_JSP_PAGE = "/oauth_response.jsp";
 
     private static final String OIDC_DIALECT = "http://wso2.org/oidc/claim";
 
-    private static OpenIDConnectClaimFilterImpl openIDConnectClaimFilter;
-
-    private static ScopeMetadataService scopeMetadataService;
-
-    public static OpenIDConnectClaimFilterImpl getOpenIDConnectClaimFilter() {
-
-        return openIDConnectClaimFilter;
-    }
-
-    public static void setOpenIDConnectClaimFilter(OpenIDConnectClaimFilterImpl openIDConnectClaimFilter) {
-
-        OAuth2AuthzEndpoint.openIDConnectClaimFilter = openIDConnectClaimFilter;
-    }
-
-    public static ScopeMetadataService getScopeMetadataService() {
-
-        return scopeMetadataService;
-    }
-
-    public static void setScopeMetadataService(ScopeMetadataService scopeMetadataService) {
-
-        OAuth2AuthzEndpoint.scopeMetadataService = scopeMetadataService;
-    }
+    private static final String AUTH_SERVICE_RESPONSE = "authServiceResponse";
+    private static final String IS_API_BASED_AUTH_HANDLED = "isApiBasedAuthHandled";
+    private static final ApiAuthnHandler API_AUTHN_HANDLER = new ApiAuthnHandler();
 
     private static Class<? extends OAuthAuthzRequest> oAuthAuthzRequestClass;
 
     @GET
     @Path("/")
     @Consumes("application/x-www-form-urlencoded")
-    @Produces("text/html")
+    @Produces({"text/html", "application/json"})
     public Response authorize(@Context HttpServletRequest request, @Context HttpServletResponse response)
             throws URISyntaxException, InvalidRequestParentException {
 
@@ -277,11 +302,32 @@ public class OAuth2AuthzEndpoint {
 
         // Using a separate try-catch block as this next try block has operations in the final block.
         try {
+            request = RequestUtil.buildRequest(request);
             oAuthMessage = buildOAuthMessage(request, response);
 
         } catch (InvalidRequestParentException e) {
             EndpointUtil.triggerOnAuthzRequestException(e, request);
             throw e;
+        } catch (IdentityException e) {
+            EndpointUtil.triggerOnAuthzRequestException(e, request);
+            return handleIdentityException(request, e);
+        }
+
+        // Perform request authentication for API based auth flow.
+        if (OAuth2Util.isApiBasedAuthenticationFlow(request)) {
+            OAuthClientAuthnContext oAuthClientAuthnContext = getClientAuthnContext(request);
+            if (!oAuthClientAuthnContext.isAuthenticated()) {
+                return handleAuthFailureResponse(oAuthClientAuthnContext);
+            }
+
+            ClientAttestationContext clientAttestationContext = getClientAttestationContext(request);
+            if (clientAttestationContext.isAttestationEnabled() && !clientAttestationContext.isAttested()) {
+                return handleAttestationFailureResponse(clientAttestationContext);
+            }
+
+            if (!OAuth2Util.isApiBasedAuthSupportedGrant(request)) {
+                return handleUnsupportedGrantForApiBasedAuth();
+            }
         }
 
         try {
@@ -297,17 +343,24 @@ public class OAuth2AuthzEndpoint {
                 FrameworkUtils.startTenantFlow(tenantDomain);
             }
 
+            Response oauthResponse;
             if (isPassthroughToFramework(oAuthMessage)) {
-                return handleAuthFlowThroughFramework(oAuthMessage);
+                oauthResponse = handleAuthFlowThroughFramework(oAuthMessage);
             } else if (isInitialRequestFromClient(oAuthMessage)) {
-                return handleInitialAuthorizationRequest(oAuthMessage);
+                oauthResponse = handleInitialAuthorizationRequest(oAuthMessage);
             } else if (isAuthenticationResponseFromFramework(oAuthMessage)) {
-                return handleAuthenticationResponse(oAuthMessage);
+                oauthResponse = handleAuthenticationResponse(oAuthMessage);
             } else if (isConsentResponseFromUser(oAuthMessage)) {
-                return handleResponseFromConsent(oAuthMessage);
+                oauthResponse = handleResponseFromConsent(oAuthMessage);
             } else {
-                return handleInvalidRequest(oAuthMessage);
+                oauthResponse = handleInvalidRequest(oAuthMessage);
             }
+
+            if (isApiBasedAuthenticationFlow(oAuthMessage)) {
+                oauthResponse = handleApiBasedAuthenticationResponse(oAuthMessage, oauthResponse);
+            }
+
+            return oauthResponse;
         } catch (OAuthProblemException e) {
             EndpointUtil.triggerOnAuthzRequestException(e, request);
             return handleOAuthProblemException(oAuthMessage, e);
@@ -322,6 +375,86 @@ public class OAuth2AuthzEndpoint {
         }
     }
 
+    /**
+     * Add the federated tokens comes with the authentication result to the session data cache.
+     *
+     * @param oAuthMessage         The OAuthMessage with the session data cache entry.
+     * @param authenticationResult The authentication result of authorization call.
+     */
+    private void addFederatedTokensToSessionCache(OAuthMessage oAuthMessage,
+                                                  AuthenticationResult authenticationResult) {
+
+        if (!(authenticationResult.getProperty(FrameworkConstants.FEDERATED_TOKENS) instanceof List)) {
+            return;
+        }
+        List<FederatedToken> federatedTokens =
+                (List<FederatedToken>) authenticationResult.getProperty(FrameworkConstants.FEDERATED_TOKENS);
+
+        SessionDataCacheEntry sessionDataCacheEntry = oAuthMessage.getSessionDataCacheEntry();
+        if (sessionDataCacheEntry == null || CollectionUtils.isEmpty(federatedTokens)) {
+            return;
+        }
+        sessionDataCacheEntry.setFederatedTokens(getFederatedTokenDO(federatedTokens));
+        if (log.isDebugEnabled() && authenticationResult.getSubject() != null) {
+            log.debug("Added the federated tokens to the session data cache. Session context identifier: " +
+                    sessionDataCacheEntry.getSessionContextIdentifier() + " for the user: " +
+                    authenticationResult.getSubject().getLoggableMaskedUserId());
+        }
+    }
+
+    /**
+     * Add mapped remote claims to session cache.
+     *
+     * @param oAuthMessage         The OAuthMessage with the session data cache entry.
+     * @param authenticationResult The authentication result of authorization call.
+     */
+    private void addMappedRemoteClaimsToSessionCache(OAuthMessage oAuthMessage,
+                                                  AuthenticationResult authenticationResult) {
+
+        Optional<Map<String, String>> mappedRemoteClaims = authenticationResult.getMappedRemoteClaims();
+        if (!mappedRemoteClaims.isPresent()) {
+            return;
+        }
+
+        SessionDataCacheEntry sessionDataCacheEntry = oAuthMessage.getSessionDataCacheEntry();
+        if (sessionDataCacheEntry == null || mappedRemoteClaims.get().isEmpty()) {
+            return;
+        }
+        Map<ClaimMapping, String> mappedRemoteClaimsMap = new HashMap<>();
+        mappedRemoteClaims.get().forEach(
+                (key, value) -> mappedRemoteClaimsMap.put(ClaimMapping.build(key, key, null,
+                        false), value));
+        sessionDataCacheEntry.setMappedRemoteClaims(mappedRemoteClaimsMap);
+        if (log.isDebugEnabled() && authenticationResult.getSubject() != null) {
+            log.debug("Added the mapped remote claims to the session data cache. " +
+                    "Session context identifier: " + sessionDataCacheEntry.getSessionContextIdentifier()
+                    + " for the user: " + authenticationResult.getSubject().getLoggableMaskedUserId());
+        }
+    }
+
+    /**
+     * This method creates a list of FederatedTokenDO objects from the list of FederatedToken objects.
+     *
+     * @param federatedTokens List of FederatedToken objects to be transformed as a list of FederatedTokenDO.
+     * @return List of FederatedTokenDO objects.
+     */
+    private List<FederatedTokenDO> getFederatedTokenDO(List<FederatedToken> federatedTokens) {
+
+        if (CollectionUtils.isEmpty(federatedTokens)) {
+            return null;
+        }
+
+        List<FederatedTokenDO>  federatedTokenDOs = federatedTokens.stream().map(federatedToken -> {
+            FederatedTokenDO federatedTokenDO =
+                    new FederatedTokenDO(federatedToken.getIdp(), federatedToken.getAccessToken());
+            federatedTokenDO.setRefreshToken(federatedToken.getRefreshToken());
+            federatedTokenDO.setScope(federatedToken.getScope());
+            federatedTokenDO.setTokenValidityPeriod(federatedToken.getTokenValidityPeriod());
+            return federatedTokenDO;
+        }).collect(Collectors.toList());
+
+        return federatedTokenDOs;
+    }
 
     private void setCommonAuthIdToRequest(HttpServletRequest request, HttpServletResponse response) {
 
@@ -337,7 +470,7 @@ public class OAuth2AuthzEndpoint {
     @POST
     @Path("/")
     @Consumes("application/x-www-form-urlencoded")
-    @Produces("text/html")
+    @Produces({"text/html", "application/json"})
     public Response authorizePost(@Context HttpServletRequest request, @Context HttpServletResponse response,
                                   MultivaluedMap paramMap)
             throws URISyntaxException, InvalidRequestParentException {
@@ -412,13 +545,29 @@ public class OAuth2AuthzEndpoint {
         if (oAuthMessage.getSessionDataCacheEntry() != null) {
             params = oAuthMessage.getSessionDataCacheEntry().getoAuth2Parameters();
         }
-        if (log.isDebugEnabled()) {
-            log.debug("Server error occurred while performing authorization", e);
-        }
+        log.error("Server error occurred while performing authorization", e);
         OAuthProblemException ex = OAuthProblemException.error(OAuth2ErrorCodes.SERVER_ERROR,
                 "Server error occurred while performing authorization");
         return Response.status(HttpServletResponse.SC_FOUND).location(new URI(
                 EndpointUtil.getErrorRedirectURL(oAuthMessage.getRequest(), ex, params))).build();
+    }
+
+    private Response handleIdentityException(HttpServletRequest request, IdentityException e)
+            throws URISyntaxException {
+
+        if (OAuth2ErrorCodes.SERVER_ERROR.equals(e.getErrorCode())) {
+            log.error("Server error occurred while performing authorization", e);
+            OAuthProblemException ex = OAuthProblemException.error(OAuth2ErrorCodes.SERVER_ERROR,
+                    "Server error occurred while performing authorization");
+            return Response.status(HttpServletResponse.SC_FOUND).location(new URI(
+                    EndpointUtil.getErrorRedirectURL(request, ex, null))).build();
+        }
+        if (log.isDebugEnabled()) {
+            log.debug("Invalid authorization request", e);
+        }
+        return Response.status(HttpServletResponse.SC_FOUND).location(new URI(EndpointUtil.getErrorPageURL(request,
+                e.getErrorCode(), OAuth2ErrorCodes.OAuth2SubErrorCodes.INVALID_AUTHORIZATION_REQUEST,
+                e.getMessage(), null))).build();
     }
 
     private Response handleOAuthProblemException(OAuthMessage oAuthMessage, OAuthProblemException e) throws
@@ -504,7 +653,7 @@ public class OAuth2AuthzEndpoint {
         authorizationResponseDTO.setState(oauth2Params.getState());
         authorizationResponseDTO.setResponseMode(oauth2Params.getResponseMode());
         authorizationResponseDTO.setResponseType(oauth2Params.getResponseType());
-        authorizationResponseDTO.getSuccessResponseDTO().setScope(oauth2Params.getScopes());
+        authorizationResponseDTO.setMtlsRequest(oauth2Params.isMtlsRequest());
 
         return authorizationResponseDTO;
     }
@@ -514,8 +663,10 @@ public class OAuth2AuthzEndpoint {
      * @param authorizationResponseDTO AuthorizationResponseDTO instance
      * @return ResponseModeProvider
      */
-    private ResponseModeProvider getResponseModeProvider(AuthorizationResponseDTO authorizationResponseDTO) {
+    private ResponseModeProvider getResponseModeProvider(AuthorizationResponseDTO authorizationResponseDTO)
+            throws OAuthProblemException {
 
+        validateResponseModeWithResponseType(authorizationResponseDTO);
         Map<String, ResponseModeProvider> responseModeProviders =
                 OAuth2ServiceComponentHolder.getResponseModeProviders();
         for (Map.Entry<String, ResponseModeProvider> entry : responseModeProviders.entrySet()) {
@@ -525,6 +676,21 @@ public class OAuth2AuthzEndpoint {
             }
         }
         return OAuth2ServiceComponentHolder.getResponseModeProvider(OAuthConstants.ResponseModes.DEFAULT);
+    }
+
+    private void validateResponseModeWithResponseType(AuthorizationResponseDTO authorizationResponseDTO)
+            throws OAuthProblemException {
+
+        String responseType = authorizationResponseDTO.getResponseType();
+        String responseMode = authorizationResponseDTO.getResponseMode();
+
+        // Response mode query.jwt should not be used in conjunction with the response types token and/or id_token.
+        if (hasIDTokenOrTokenInResponseType(responseType) &&
+                OAuthConstants.ResponseModes.QUERY_JWT.equals(responseMode)) {
+
+            throw OAuthProblemException.error(OAuth2ErrorCodes.INVALID_REQUEST,
+                    OAuthConstants.OAuthError.AuthorizationResponsei18nKey.INVALID_RESPONSE_TYPE_FOR_QUERY_JWT);
+        }
     }
 
     /**
@@ -565,21 +731,23 @@ public class OAuth2AuthzEndpoint {
     }
 
     private Response handleResponseFromConsent(OAuthMessage oAuthMessage) throws OAuthSystemException,
-            URISyntaxException, ConsentHandlingFailedException {
+            URISyntaxException, ConsentHandlingFailedException, OAuthProblemException {
 
         if (LoggerUtils.isDiagnosticLogsEnabled()) {
-            Map<String, Object> params = new HashMap<>();
+            DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                    OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                    OAuthConstants.LogConstants.ActionIDs.RECEIVE_CONSENT_RESPONSE);
             if (oAuthMessage.getRequest() != null && MapUtils.isNotEmpty(oAuthMessage.getRequest().getParameterMap())) {
                 oAuthMessage.getRequest().getParameterMap().forEach((key, value) -> {
                     if (ArrayUtils.isNotEmpty(value)) {
-                        params.put(key, Arrays.asList(value));
+                        diagnosticLogBuilder.inputParam(key, Arrays.asList(value));
                     }
                 });
             }
-            LoggerUtils
-                    .triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                            OAuthConstants.LogConstants.SUCCESS, "Successfully received consent response",
-                            "receive-consent-response", null);
+            diagnosticLogBuilder.resultMessage("Successfully received consent response.")
+                    .resultStatus(DiagnosticLog.ResultStatus.SUCCESS)
+                    .logDetailLevel(DiagnosticLog.LogDetailLevel.INTERNAL_SYSTEM);
+            LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
         }
 
         updateAuthTimeInSessionDataCacheEntry(oAuthMessage);
@@ -619,7 +787,7 @@ public class OAuth2AuthzEndpoint {
             handleUserConsent(oAuthMessage, consent, sessionState, oauth2Params, authorizationResponseDTO);
 
             if (isFormPostWithoutErrors(oAuthMessage, authorizationResponseDTO)) {
-                handleFormPostResponseMode(oAuthMessage, sessionState, authorizationResponseDTO);
+                handleFormPostResponseMode(oAuthMessage, sessionState, authorizationResponseDTO, null);
                 if (authorizationResponseDTO.getIsForwardToOAuthResponseJSP()) {
                     return Response.ok().build();
                 }
@@ -697,13 +865,13 @@ public class OAuth2AuthzEndpoint {
                                     "Therefore handling post consent is not applicable.");
                 }
                 if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                    Map<String, Object> params = new HashMap<>();
-                    params.put("clientId", clientId);
-                    Map<String, Object> configs = new HashMap<>();
-                    configs.put("skipConsent", "true");
-                    LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                            OAuthConstants.LogConstants.SUCCESS, "Consent is disabled for the OAuth client.",
-                            "handle-consent", configs);
+                    LoggerUtils.triggerDiagnosticLogEvent(new DiagnosticLog.DiagnosticLogBuilder(
+                            OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, "handle-consent")
+                            .inputParam(LogConstants.InputKeys.CLIENT_ID, clientId)
+                            .configParam("skip consent", "true")
+                            .resultMessage("Consent is disabled for the OAuth client.")
+                            .resultStatus(DiagnosticLog.ResultStatus.SUCCESS)
+                            .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION));
                 }
                 return;
             }
@@ -729,8 +897,13 @@ public class OAuth2AuthzEndpoint {
                 value.setRequestedClaims(removeConsentRequestedNullUserAttributes(value.getRequestedClaims(),
                         loggedInUser.getUserAttributes(), spTenantDomain));
                 List<ClaimMetaData> requestedOidcClaimsList =
-                        getRequestedOidcClaimsList(value, oauth2Params, spTenantDomain);
+                        getRequestedOidcClaimsList(value, oauth2Params, spTenantDomain, false);
                 value.setRequestedClaims(requestedOidcClaimsList);
+                // The instance value contains the configured mandatory claims values. But if the client was not
+                // requested any mandatory claim, then we have to remove it from the values.
+                List<ClaimMetaData> mandatoryOidcClaimsList =
+                        getRequestedOidcClaimsList(value, oauth2Params, spTenantDomain, true);
+                value.setMandatoryClaims(mandatoryOidcClaimsList);
             }
 
             // Call framework and create the consent receipt.
@@ -740,26 +913,33 @@ public class OAuth2AuthzEndpoint {
             }
 
             Map<String, Object> params;
+            DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = null;
+            if (LoggerUtils.isDiagnosticLogsEnabled()) {
+                diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                        OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                        OAuthConstants.LogConstants.ActionIDs.HAND_OVER_TO_CONSENT_SERVICE)
+                        .inputParam(LogConstants.InputKeys.CLIENT_ID, clientId)
+                        .inputParam(OAuthConstants.LogConstants.InputKeys.PROMPT, oauth2Params.getPrompt())
+                        .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION)
+                        .resultStatus(DiagnosticLog.ResultStatus.SUCCESS);
+            }
             if (hasPromptContainsConsent(oauth2Params)) {
-                if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                    params = new HashMap<>();
-                    params.put("clientId", clientId);
-                    params.put("prompt", oauth2Params.getPrompt());
-                    LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                            OAuthConstants.LogConstants.SUCCESS, "Prompt for consent is enabled. Overriding the " +
-                                    "existing consent and handing over to consent service.", "hand-over-to-consent" +
-                                    "-service", null);
+                if (diagnosticLogBuilder != null) {
+                    // diagnosticLogBuilder will be null if diagnostic logs are disabled.
+                    diagnosticLogBuilder.resultMessage("Prompt for consent is enabled. Overriding the existing " +
+                            "consent and handing over to consent service.");
+                    LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
                 }
                 getSSOConsentService().processConsent(approvedClaimIds, serviceProvider,
                         loggedInUser, value, true);
             } else {
                 if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                    params = new HashMap<>();
-                    params.put("clientId", clientId);
-                    params.put("prompt", oauth2Params.getPrompt());
-                    LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                            OAuthConstants.LogConstants.SUCCESS, "Prompt for consent is not enabled. " +
-                                    "Handing over to consent service.", "hand-over-to-consent-service", null);
+                    if (diagnosticLogBuilder != null) {
+                        // diagnosticLogBuilder will be null if diagnostic logs are disabled.
+                        diagnosticLogBuilder.resultMessage("Prompt for consent is not enabled. Handing over to " +
+                                "consent service.");
+                        LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
+                    }
                 }
                 getSSOConsentService().processConsent(approvedClaimIds, serviceProvider,
                         loggedInUser, value, false);
@@ -767,26 +947,37 @@ public class OAuth2AuthzEndpoint {
 
         } catch (OAuthSystemException | SSOConsentServiceException e) {
             if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, null,
-                        OAuthConstants.LogConstants.FAILED, "System error occurred.", "process-consent", null);
+                LoggerUtils.triggerDiagnosticLogEvent(new DiagnosticLog.DiagnosticLogBuilder(
+                        OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                        OAuthConstants.LogConstants.ActionIDs.PROCESS_CONSENT)
+                        .resultMessage("System error occurred.")
+                        .resultStatus(DiagnosticLog.ResultStatus.FAILED)
+                        .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION));
             }
             String msg = "Error while processing consent of user: " + loggedInUser.toFullQualifiedUsername() + " for " +
                     "client_id: " + clientId + " of tenantDomain: " + spTenantDomain;
             throw new ConsentHandlingFailedException(msg, e);
         } catch (ClaimMetadataException e) {
             if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, null,
-                        OAuthConstants.LogConstants.FAILED,
-                        String.format("Error occurred while getting " + "claim mappings for %s.", OIDC_DIALECT),
-                        "process-consent", null);
+                LoggerUtils.triggerDiagnosticLogEvent(new DiagnosticLog.DiagnosticLogBuilder(
+                        OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                        OAuthConstants.LogConstants.ActionIDs.PROCESS_CONSENT)
+                        .resultMessage(String.format("Error occurred while getting claim mappings for %s.",
+                                OIDC_DIALECT))
+                        .resultStatus(DiagnosticLog.ResultStatus.FAILED)
+                        .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION));
             }
             throw new ConsentHandlingFailedException("Error while getting claim mappings for " + OIDC_DIALECT, e);
         } catch (RequestObjectException e) {
             if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, null,
-                        OAuthConstants.LogConstants.FAILED,
-                        String.format("Error occurred while getting essential claims for the session data key : %s.",
-                                oauth2Params.getSessionDataKey()), "process-consent", null);
+
+                LoggerUtils.triggerDiagnosticLogEvent(new DiagnosticLog.DiagnosticLogBuilder(
+                        OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                        OAuthConstants.LogConstants.ActionIDs.PROCESS_CONSENT)
+                        .resultMessage(String.format("Error occurred while getting essential claims " +
+                                                "for the session data key : %s.", oauth2Params.getSessionDataKey()))
+                        .resultStatus(DiagnosticLog.ResultStatus.FAILED)
+                        .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION));
             }
             throw new ConsentHandlingFailedException("Error while getting essential claims for the session data key " +
                     ": " + oauth2Params.getSessionDataKey(), e);
@@ -798,16 +989,13 @@ public class OAuth2AuthzEndpoint {
                                                        OAuth2Parameters oAuth2Parameters)
             throws SSOConsentServiceException {
 
-        List<String> claimsListOfScopes =
-                openIDConnectClaimFilter.getClaimsFilteredByOIDCScopes(oAuth2Parameters.getScopes(),
-                        oAuth2Parameters.getTenantDomain());
         if (hasPromptContainsConsent(oAuth2Parameters)) {
             // Ignore all previous consents and get consent required claims
-            return getSSOConsentService().getConsentRequiredClaimsWithoutExistingConsents(serviceProvider, user,
-                    claimsListOfScopes);
+            return getSSOConsentService().getConsentRequiredClaimsWithoutExistingConsents(
+                    serviceProvider, user);
         } else {
-            return getSSOConsentService().getConsentRequiredClaimsWithExistingConsents(serviceProvider, user,
-                    claimsListOfScopes);
+            return getSSOConsentService().getConsentRequiredClaimsWithExistingConsents(
+                    serviceProvider, user);
         }
     }
 
@@ -894,7 +1082,8 @@ public class OAuth2AuthzEndpoint {
 
     private void handleFormPostResponseMode(OAuthMessage oAuthMessage,
                                             OIDCSessionState sessionState,
-                                            AuthorizationResponseDTO authorizationResponseDTO) {
+                                            AuthorizationResponseDTO authorizationResponseDTO,
+                                            AuthenticatedUser authenticatedUser) {
 
         String authenticatedIdPs = oAuthMessage.getSessionDataCacheEntry().getAuthenticatedIdPs();
         OAuth2Parameters oauth2Params = getOauth2Params(oAuthMessage);
@@ -913,7 +1102,12 @@ public class OAuth2AuthzEndpoint {
             String params = buildParams(authorizationResponseDTO.getSuccessResponseDTO().getFormPostBody(),
                     authenticatedIdPs, sessionStateValue);
             String redirectURI = oauth2Params.getRedirectURI();
-            forwardToOauthResponseJSP(oAuthMessage, params, redirectURI);
+            if (authenticatedUser != null) {
+                forwardToOauthResponseJSP(oAuthMessage, params, redirectURI, authorizationResponseDTO,
+                        authenticatedUser);
+            } else {
+                forwardToOauthResponseJSP(oAuthMessage, params, redirectURI);
+            }
             authorizationResponseDTO.setIsForwardToOAuthResponseJSP(true);
         } else {
             authorizationResponseDTO.setAuthenticatedIDPs(authenticatedIdPs);
@@ -941,7 +1135,7 @@ public class OAuth2AuthzEndpoint {
                 getOauth2Params(oAuthMessage).getApplicationName(), false,
                 oauth2Params.getClientId());
 
-        OAuthErrorDTO oAuthErrorDTO = EndpointUtil.getOAuth2Service().handleUserConsentDenial(oauth2Params);
+        OAuthErrorDTO oAuthErrorDTO = getOAuth2Service().handleUserConsentDenial(oauth2Params);
         OAuthProblemException consentDenialException = buildConsentDenialException(oAuthErrorDTO);
 
         if (ResponseModeProvider.AuthResponseType.POST_RESPONSE.equals(responseModeProvider.getAuthResponseType())) {
@@ -980,20 +1174,23 @@ public class OAuth2AuthzEndpoint {
     }
 
     private Response handleAuthenticationResponse(OAuthMessage oAuthMessage)
-            throws OAuthSystemException, URISyntaxException, ConsentHandlingFailedException {
+            throws OAuthSystemException, URISyntaxException, ConsentHandlingFailedException, OAuthProblemException {
 
         if (LoggerUtils.isDiagnosticLogsEnabled()) {
-            Map<String, Object> requestParams = new HashMap<>();
+            DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                    OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                    OAuthConstants.LogConstants.ActionIDs.RECEIVE_AUTHENTICATION_RESPONSE);
             if (oAuthMessage.getRequest() != null && MapUtils.isNotEmpty(oAuthMessage.getRequest().getParameterMap())) {
                 oAuthMessage.getRequest().getParameterMap().forEach((key, value) -> {
                     if (ArrayUtils.isNotEmpty(value)) {
-                        requestParams.put(key, Arrays.asList(value));
+                        diagnosticLogBuilder.inputParam(key, Arrays.asList(value));
                     }
                 });
             }
-            LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, requestParams,
-                    OAuthConstants.LogConstants.SUCCESS, "Received authentication response from Framework.",
-                    "receive-authn-response", null);
+            diagnosticLogBuilder.resultMessage("Received authentication response from Framework.")
+                    .resultStatus(DiagnosticLog.ResultStatus.SUCCESS)
+                    .logDetailLevel(DiagnosticLog.LogDetailLevel.INTERNAL_SYSTEM);
+            LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
         }
 
         updateAuthTimeInSessionDataCacheEntry(oAuthMessage);
@@ -1025,35 +1222,53 @@ public class OAuth2AuthzEndpoint {
                     }
                 }
                 if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                    Map<String, Object> params = new HashMap<>();
-                    params.put("clientId", oAuthMessage.getClientId());
+                    DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                            OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                            OAuthConstants.LogConstants.ActionIDs.VALIDATE_AUTHENTICATION_RESPONSE);
+                    diagnosticLogBuilder.inputParam(LogConstants.InputKeys.APPLICATION_NAME,
+                                    oauth2Params.getApplicationName())
+                            .inputParam(LogConstants.InputKeys.CLIENT_ID, oAuthMessage.getClientId())
+                            .inputParam(LogConstants.InputKeys.TENANT_DOMAIN, tenantDomain)
+                            .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION);
                     if (userIdentifier != null) {
-                        params.put("authenticatedUser", userIdentifier);
+                        diagnosticLogBuilder.inputParam(LogConstants.InputKeys.USER_ID, userIdentifier);
+                        if (LoggerUtils.isLogMaskingEnable) {
+                            diagnosticLogBuilder.inputParam(LogConstants.InputKeys.USER,
+                                    LoggerUtils.getMaskedContent(authnResult.getSubject().getUserName()));
+                        }
                     }
-                    LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                            OAuthConstants.LogConstants.SUCCESS, "Authentication is successful.",
-                            "validate-authn-status", null);
+                    if (oAuthMessage.getAuthorizationGrantCacheEntry() != null) {
+                        diagnosticLogBuilder.inputParam("authentication method reference",
+                                oAuthMessage.getAuthorizationGrantCacheEntry().getAmrList());
+                    }
+                    diagnosticLogBuilder.resultStatus(DiagnosticLog.ResultStatus.SUCCESS)
+                            .resultMessage("Authentication is successful.");
+                    LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
                 }
                 return handleSuccessfulAuthentication(oAuthMessage, oauth2Params, authnResult,
                         authorizationResponseDTO, responseModeProvider);
 
             } else {
                 if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                    Map<String, Object> params = new HashMap<>();
-                    params.put("clientId", oAuthMessage.getClientId());
-                    LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                            OAuthConstants.LogConstants.FAILED, "Authentication failed.", "validate-authn-status",
-                            null);
+                    LoggerUtils.triggerDiagnosticLogEvent(new DiagnosticLog.DiagnosticLogBuilder(
+                            OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                            OAuthConstants.LogConstants.ActionIDs.VALIDATE_AUTHENTICATION_RESPONSE)
+                            .inputParam(LogConstants.InputKeys.CLIENT_ID, oAuthMessage.getClientId())
+                            .resultMessage("Authentication failed.")
+                            .resultStatus(DiagnosticLog.ResultStatus.FAILED)
+                            .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION));
                 }
                 return handleFailedAuthentication(oAuthMessage, oauth2Params, authnResult, authorizationResponseDTO);
             }
         } else {
             if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                Map<String, Object> params = new HashMap<>();
-                params.put("clientId", oAuthMessage.getClientId());
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                        OAuthConstants.LogConstants.FAILED, "Authentication status is empty.", "validate-authn-status",
-                        null);
+                LoggerUtils.triggerDiagnosticLogEvent(new DiagnosticLog.DiagnosticLogBuilder(
+                        OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                        OAuthConstants.LogConstants.ActionIDs.VALIDATE_AUTHENTICATION_RESPONSE)
+                        .inputParam(LogConstants.InputKeys.CLIENT_ID, oAuthMessage.getClientId())
+                        .resultMessage("Authentication status is empty")
+                        .resultStatus(DiagnosticLog.ResultStatus.FAILED)
+                        .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION));
             }
             return handleEmptyAuthenticationResult(oAuthMessage, authorizationResponseDTO);
         }
@@ -1084,6 +1299,8 @@ public class OAuth2AuthzEndpoint {
         try {
             redirectURL = doUserAuthorization(oAuthMessage, oAuthMessage.getSessionDataKeyFromLogin(), sessionState,
                     authorizationResponseDTO);
+            String serviceProviderId = oAuthMessage.getRequest().getParameter(SERVICE_PROVIDER_ID);
+            redirectURL = addServiceProviderIdToRedirectURI(redirectURL, serviceProviderId);
         } catch (OAuthProblemException ex) {
             if (isFormPostOrFormPostJWTResponseMode(oauth2Params.getResponseMode())) {
                 return handleFailedState(oAuthMessage, oauth2Params, ex, authorizationResponseDTO);
@@ -1095,7 +1312,7 @@ public class OAuth2AuthzEndpoint {
 
         if (!authorizationResponseDTO.getIsConsentRedirect()) {
             if (isFormPostWithoutErrors(oAuthMessage, authorizationResponseDTO)) {
-                handleFormPostResponseMode(oAuthMessage, sessionState, authorizationResponseDTO);
+                handleFormPostResponseMode(oAuthMessage, sessionState, authorizationResponseDTO, authenticatedUser);
                 if (authorizationResponseDTO.getIsForwardToOAuthResponseJSP()) {
                     return Response.ok().build();
                 }
@@ -1155,7 +1372,7 @@ public class OAuth2AuthzEndpoint {
                                                 AuthorizationResponseDTO authorizationResponseDTO)
             throws URISyntaxException {
 
-        OAuthErrorDTO oAuthErrorDTO = EndpointUtil.getOAuth2Service().handleAuthenticationFailure(oauth2Params);
+        OAuthErrorDTO oAuthErrorDTO = getOAuth2Service().handleAuthenticationFailure(oauth2Params);
         OAuthProblemException oauthException = buildOAuthProblemException(authnResult, oAuthErrorDTO);
         return handleFailedState(oAuthMessage, oauth2Params, oauthException, authorizationResponseDTO);
     }
@@ -1180,30 +1397,6 @@ public class OAuth2AuthzEndpoint {
         )).build();
     }
 
-    private Response handleFormPostMode(OAuthMessage oAuthMessage, OAuth2Parameters oauth2Params, String redirectURL,
-                                        boolean isOIDCRequest, OIDCSessionState sessionState, AuthorizationResponseDTO
-                                                authorizationResponseDTO) {
-
-        String sessionStateValue = null;
-        if (isOIDCRequest) {
-            sessionState.setAddSessionState(true);
-            sessionStateValue = manageOIDCSessionState(oAuthMessage,
-                    sessionState,
-                    oauth2Params,
-                    getLoggedInUser(oAuthMessage).getAuthenticatedSubjectIdentifier(),
-                    oAuthMessage.getSessionDataCacheEntry(), authorizationResponseDTO);
-            authorizationResponseDTO.setSessionState(sessionStateValue);
-        }
-        if (OAuthServerConfiguration.getInstance().isOAuthResponseJspPageAvailable()) {
-            String params = buildParams(redirectURL, StringUtils.EMPTY, sessionStateValue);
-            String redirectURI = oauth2Params.getRedirectURI();
-            return forwardToOauthResponseJSP(oAuthMessage, params, redirectURI);
-        } else {
-            return Response.ok(createFormPage(redirectURL, oauth2Params.getRedirectURI(),
-                    StringUtils.EMPTY, sessionStateValue)).build();
-        }
-    }
-
     private void addToAuthenticationResultDetailsToOAuthMessage(OAuthMessage oAuthMessage,
                                                                 AuthenticationResult authnResult,
                                                                 AuthenticatedUser authenticatedUser) {
@@ -1212,6 +1405,11 @@ public class OAuth2AuthzEndpoint {
         oAuthMessage.getSessionDataCacheEntry().setAuthenticatedIdPs(authnResult.getAuthenticatedIdPs());
         oAuthMessage.getSessionDataCacheEntry().setSessionContextIdentifier((String)
                 authnResult.getProperty(FrameworkConstants.AnalyticsAttributes.SESSION_ID));
+        // Adding federated tokens come with the authentication result of the authorization call.
+        addFederatedTokensToSessionCache(oAuthMessage, authnResult);
+        // Adding mapped remoted claims come with the authentication result to resolve access token claims in
+        // federated flow.
+        addMappedRemoteClaimsToSessionCache(oAuthMessage, authnResult);
     }
 
     private void updateAuthTimeInSessionDataCacheEntry(OAuthMessage oAuthMessage) {
@@ -1250,23 +1448,54 @@ public class OAuth2AuthzEndpoint {
             OAuthProblemException, URISyntaxException, InvalidRequestParentException {
 
         if (LoggerUtils.isDiagnosticLogsEnabled()) {
-            Map<String, Object> params = new HashMap<>();
+            DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                    OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                    OAuthConstants.LogConstants.ActionIDs.RECEIVE_AUTHORIZATION_RESPONSE);
             if (oAuthMessage.getRequest() != null && MapUtils.isNotEmpty(oAuthMessage.getRequest().getParameterMap())) {
                 oAuthMessage.getRequest().getParameterMap().forEach((key, value) -> {
                     if (ArrayUtils.isNotEmpty(value)) {
-                        params.put(key, Arrays.asList(value));
+                        if (STATE.equals(key) || LOGIN_HINT.equals(key)) {
+                            String[] maskedValue = Arrays.copyOf(value, value.length);
+                            Arrays.setAll(maskedValue, i ->
+                                    LoggerUtils.isLogMaskingEnable ?
+                                            LoggerUtils.getMaskedContent(maskedValue[i]) : maskedValue[i]);
+                            diagnosticLogBuilder.inputParam(key, Arrays.asList(maskedValue));
+                        } else {
+                            diagnosticLogBuilder.inputParam(key, Arrays.asList(value));
+                        }
                     }
                 });
             }
-            LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                    OAuthConstants.LogConstants.SUCCESS, "Successfully received OAuth2 Authorize request.",
-                    "receive-authz-request", null);
+            String userAgentHeader = oAuthMessage.getRequest().getHeader("User-Agent");
+            if (StringUtils.isNotEmpty(userAgentHeader)) {
+                UserAgent userAgent = new UserAgent(userAgentHeader);
+                diagnosticLogBuilder.inputParam("login browser", userAgent.getBrowser())
+                        .inputParam("login device", userAgent.getDevice());
+            }
+            diagnosticLogBuilder.resultMessage("Successfully received OAuth2 Authorize request.")
+                    .resultStatus(DiagnosticLog.ResultStatus.SUCCESS)
+                    .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION);
+            LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
         }
         String redirectURL = handleOAuthAuthorizationRequest(oAuthMessage);
         String type = getRequestProtocolType(oAuthMessage);
-
+        try {
+            // Add the service provider id to the redirect URL. This is needed to support application wise branding.
+            String clientId = oAuthMessage.getRequest().getParameter(CLIENT_ID);
+            if (StringUtils.isNotBlank(clientId)) {
+                ServiceProvider serviceProvider = getServiceProvider(clientId);
+                if (serviceProvider != null) {
+                    redirectURL = addServiceProviderIdToRedirectURI(redirectURL,
+                            serviceProvider.getApplicationResourceId());
+                }
+            }
+        } catch (OAuthSystemException e) {
+            // The value is set to be used for branding purposes. Therefore, if an error occurs, the process should
+            // continue without breaking.
+            log.debug("Error while getting the service provider id", e);
+        }
         if (AuthenticatorFlowStatus.SUCCESS_COMPLETED == oAuthMessage.getFlowStatus()) {
-            return handleAuthFlowThroughFramework(oAuthMessage, type);
+            return handleAuthFlowThroughFramework(oAuthMessage, type, redirectURL);
         } else {
             return Response.status(HttpServletResponse.SC_FOUND).location(new URI(redirectURL)).build();
         }
@@ -1400,13 +1629,16 @@ public class OAuth2AuthzEndpoint {
         String responseType = oauth2Params.getResponseType();
         HttpRequestHeaderHandler httpRequestHeaderHandler = new HttpRequestHeaderHandler(oAuthMessage.getRequest());
         OAuth2AuthorizeReqDTO authzReqDTO =
-                buildAuthRequest(oauth2Params, oAuthMessage.getSessionDataCacheEntry(), httpRequestHeaderHandler);
+                buildAuthRequest(oauth2Params, oAuthMessage.getSessionDataCacheEntry(), httpRequestHeaderHandler,
+                        oAuthMessage.getRequest());
         /* We have persisted the oAuthAuthzReqMessageContext before the consent after scope validation. Here we
         retrieve it from the cache and use it again because it contains  information that was set during the scope
         validation process. */
         OAuthAuthzReqMessageContext oAuthAuthzReqMessageContext =
                 oAuthMessage.getSessionDataCacheEntry().getAuthzReqMsgCtx();
         oAuthAuthzReqMessageContext.setAuthorizationReqDTO(authzReqDTO);
+        oAuthAuthzReqMessageContext.addProperty(OAuthConstants.IS_MTLS_REQUEST, oauth2Params.isMtlsRequest());
+        oAuthAuthzReqMessageContext.setApprovedAuthorizationDetails(oauth2Params.getAuthorizationDetails());
         // authorizing the request
         OAuth2AuthorizeRespDTO authzRespDTO = authorize(oAuthAuthzReqMessageContext);
         if (authzRespDTO != null && authzRespDTO.getCallbackURI() != null) {
@@ -1442,11 +1674,33 @@ public class OAuth2AuthzEndpoint {
         }
     }
 
+    /**
+     * Checks if the given response type contains either "id_token" or "token".
+     *
+     * @param responseType The response type to check.
+     * @return {@code true} if "id_token" or "token" is present in the response type, {@code false} otherwise.
+     */
     private boolean hasIDTokenOrTokenInResponseType(String responseType) {
 
-        return StringUtils.isNotBlank(responseType)
-                && (responseType.toLowerCase().contains(OAuthConstants.ID_TOKEN)
-                || responseType.toLowerCase().contains(OAuthConstants.TOKEN));
+        return hasResponseType(responseType, OAuthConstants.ID_TOKEN)
+                || hasResponseType(responseType, OAuthConstants.TOKEN);
+    }
+
+    /**
+     * Checks if the given response type contains the specified OAuth response type.
+     *
+     * @param responseType      The response type to check.
+     * @param oauthResponseType The OAuth response type to look for.
+     * @return {@code true} if the specified OAuth response type is present in the response type,
+     * {@code false} otherwise.
+     */
+    private boolean hasResponseType(String responseType, String oauthResponseType) {
+
+        if (StringUtils.isNotBlank(responseType)) {
+            String[] responseTypes = responseType.split(SPACE_SEPARATOR);
+            return Arrays.asList(responseTypes).contains(oauthResponseType);
+        }
+        return false;
     }
 
     private String buildOIDCResponseWithURIFragment(OAuthResponse oauthResponse, OAuth2AuthorizeRespDTO authzRespDTO) {
@@ -1476,17 +1730,24 @@ public class OAuth2AuthzEndpoint {
         AuthenticatedUser loggedInUser = getLoggedInUser(oAuthMessage);
         String clientId = oauth2Params.getClientId();
 
-        ServiceProvider serviceProvider = getServiceProvider(oauth2Params.getClientId());
-
-        if (!isConsentSkipped(serviceProvider)) {
+        if (!isConsentSkipped(oauth2Params)) {
             boolean approvedAlways = OAuthConstants.Consent.APPROVE_ALWAYS.equals(consent);
             if (approvedAlways) {
                 OpenIDConnectUserRPStore.getInstance().putUserRPToStore(loggedInUser, applicationName,
                         true, clientId);
+                final AuthorizationDetails userConsentedAuthorizationDetails = AuthorizationDetailsUtils
+                        .extractAuthorizationDetailsFromRequest(oAuthMessage.getRequest(), oauth2Params);
+
                 if (hasPromptContainsConsent(oauth2Params)) {
                     EndpointUtil.storeOAuthScopeConsent(loggedInUser, oauth2Params, true);
+                    OAuth2ServiceComponentHolder.getInstance().getAuthorizationDetailsService()
+                            .replaceUserConsentedAuthorizationDetails(loggedInUser, clientId, oauth2Params,
+                                    userConsentedAuthorizationDetails);
                 } else {
                     EndpointUtil.storeOAuthScopeConsent(loggedInUser, oauth2Params, false);
+                    OAuth2ServiceComponentHolder.getInstance().getAuthorizationDetailsService()
+                            .storeOrUpdateUserConsentedAuthorizationDetails(loggedInUser, clientId, oauth2Params,
+                                    userConsentedAuthorizationDetails);
                 }
             }
         }
@@ -1509,6 +1770,22 @@ public class OAuth2AuthzEndpoint {
         OAuthProblemException oauthProblemException = OAuthProblemException.error(
                 errorCode, errorMsg);
         authorizationResponseDTO.setError(HttpServletResponse.SC_FOUND, errorMsg, errorCode);
+        if (LoggerUtils.isDiagnosticLogsEnabled()) {
+            DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                    OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                    OAuthConstants.LogConstants.ActionIDs.HANDLE_AUTHORIZATION);
+            if (oauth2Params != null) {
+                diagnosticLogBuilder.inputParam(LogConstants.InputKeys.CLIENT_ID, oauth2Params.getClientId())
+                        .inputParam(LogConstants.InputKeys.APPLICATION_NAME, oauth2Params.getApplicationName())
+                        .inputParam(OAuthConstants.LogConstants.InputKeys.REDIRECT_URI, oauth2Params.getRedirectURI())
+                        .inputParam(LogConstants.InputKeys.SCOPE, oauth2Params.getScopes())
+                        .inputParam(RESPONSE_TYPE, oauth2Params.getResponseType());
+            }
+            diagnosticLogBuilder.resultStatus(DiagnosticLog.ResultStatus.FAILED)
+                    .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION)
+                    .resultMessage(errorMsg);
+            LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
+        }
         return EndpointUtil.getErrorRedirectURL(oAuthMessage.getRequest(),
                 oauthProblemException, oauth2Params);
     }
@@ -1529,6 +1806,22 @@ public class OAuth2AuthzEndpoint {
                 authzRespDTO.getErrorCode(), errorMsg);
         authorizationResponseDTO.setError(HttpServletResponse.SC_FOUND, errorMsg,
                 authzRespDTO.getErrorCode());
+        if (LoggerUtils.isDiagnosticLogsEnabled()) {
+            DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                    OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                    OAuthConstants.LogConstants.ActionIDs.HANDLE_AUTHORIZATION);
+            if (oauth2Params != null) {
+                diagnosticLogBuilder.inputParam(LogConstants.InputKeys.CLIENT_ID, oauth2Params.getClientId())
+                        .inputParam(LogConstants.InputKeys.APPLICATION_NAME, oauth2Params.getApplicationName())
+                        .inputParam(OAuthConstants.LogConstants.InputKeys.REDIRECT_URI, oauth2Params.getRedirectURI())
+                        .inputParam(LogConstants.InputKeys.SCOPE, oauth2Params.getScopes())
+                        .inputParam(RESPONSE_TYPE, oauth2Params.getResponseType());
+            }
+            diagnosticLogBuilder.resultStatus(DiagnosticLog.ResultStatus.FAILED)
+                    .resultMessage("Error occurred while processing the authorization: " + errorMsg)
+                    .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION);
+            LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
+        }
         return EndpointUtil.getErrorRedirectURL(oAuthMessage.getRequest(), oauthProblemException, oauth2Params);
     }
 
@@ -1539,6 +1832,19 @@ public class OAuth2AuthzEndpoint {
                 : "Error occurred while processing authorization request.";
         OAuthProblemException oauthProblemException = OAuthProblemException.error(
                 authzRespDTO.getErrorCode(), errorMsg);
+        if (LoggerUtils.isDiagnosticLogsEnabled()) {
+            DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                    OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                    OAuthConstants.LogConstants.ActionIDs.VALIDATE_SCOPES_BEFORE_CONSENT);
+            diagnosticLogBuilder.inputParam(LogConstants.InputKeys.CLIENT_ID, oauth2Params.getClientId())
+                    .inputParam(LogConstants.InputKeys.APPLICATION_NAME, oauth2Params.getApplicationName())
+                    .inputParam(OAuthConstants.LogConstants.InputKeys.REDIRECT_URI, authzRespDTO.getCallbackURI())
+                    .resultMessage("Error occurred when processing the authorization request before consent. " +
+                            authzRespDTO.getErrorMsg())
+                    .resultStatus(DiagnosticLog.ResultStatus.FAILED)
+                    .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION);
+            LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
+        }
         return EndpointUtil.getErrorRedirectURL(oAuthMessage.getRequest(), oauthProblemException, oauth2Params);
     }
 
@@ -1557,25 +1863,34 @@ public class OAuth2AuthzEndpoint {
             String tokenBindingValue = null;
             if (tokenBinderOptional.isPresent()) {
                 TokenBinder tokenBinder = tokenBinderOptional.get();
-                tokenBindingValue = tokenBinder.getOrGenerateTokenBindingValue(oAuthMessage.getRequest());
-                tokenBinder.setTokenBindingValueForResponse(oAuthMessage.getResponse(), tokenBindingValue);
-                if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                    Map<String, Object> params = new HashMap<>();
-                    params.put("clientId", oauth2Params.getClientId());
-                    params.put("tokenBindingValue", tokenBindingValue);
-                    Map<String, Object> configs = new HashMap<>();
-                    configs.put("tokenBinderType", tokenBinder.getBindingType());
-                    LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                            OAuthConstants.LogConstants.SUCCESS, "Successfully generated token binding value.",
-                            "generate-token-binding-value", configs);
+                if (!tokenBinder.getBindingType().equals(CLIENT_REQUEST)) {
+                    tokenBindingValue = tokenBinder.getOrGenerateTokenBindingValue(oAuthMessage.getRequest());
+                    tokenBinder.setTokenBindingValueForResponse(oAuthMessage.getResponse(), tokenBindingValue);
+                    if (LoggerUtils.isDiagnosticLogsEnabled()) {
+                        LoggerUtils.triggerDiagnosticLogEvent(new DiagnosticLog.DiagnosticLogBuilder(
+                                OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, "generate-token-binding-value")
+                                .inputParam(LogConstants.InputKeys.CLIENT_ID, oauth2Params.getClientId())
+                                .inputParam("token binding value", tokenBindingValue)
+                                .configParam("token binder type", tokenBinder.getBindingType())
+                                .resultMessage("Successfully generated token binding value.")
+                                .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION)
+                                .resultStatus(DiagnosticLog.ResultStatus.SUCCESS));
+                    }
                 }
             }
             setAuthorizationCode(oAuthMessage, authzRespDTO, builder, tokenBindingValue, oauth2Params,
                     authorizationResponseDTO);
         }
+        if (Constants.RESPONSE_TYPE_DEVICE.equalsIgnoreCase(responseType)) {
+            cacheUserAttributesByDeviceCode(oAuthMessage.getSessionDataCacheEntry());
+        }
         if (isResponseTypeNotIdTokenOrNone(responseType, authzRespDTO)) {
             setAccessToken(authzRespDTO, builder, authorizationResponseDTO);
-            setScopes(authzRespDTO, builder);
+            setScopes(authzRespDTO, builder, authorizationResponseDTO);
+            setAuthorizationDetails(authzRespDTO, builder, authorizationResponseDTO);
+        }
+        if (isSubjectTokenFlow(responseType, authzRespDTO)) {
+            setSubjectToken(authzRespDTO, builder, authorizationResponseDTO);
         }
         if (isIdTokenExists(authzRespDTO)) {
             setIdToken(authzRespDTO, builder, authorizationResponseDTO);
@@ -1595,16 +1910,27 @@ public class OAuth2AuthzEndpoint {
             oauthResponse = builder.location(redirectURL).buildQueryMessage();
         }
         if (LoggerUtils.isDiagnosticLogsEnabled()) {
-            Map<String, Object> params = new HashMap<>();
-            params.put("clientId", oauth2Params.getClientId());
-            params.put("responseMode", oauth2Params.getResponseMode());
-            params.put("redirectUrl", redirectURL);
-            LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                    OAuthConstants.LogConstants.SUCCESS, "Successfully generated oauth response.", "generate-response",
-                    null);
+            DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                    OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                    OAuthConstants.LogConstants.ActionIDs.HANDLE_AUTHORIZATION);
+            diagnosticLogBuilder.inputParam(LogConstants.InputKeys.CLIENT_ID, oauth2Params.getClientId())
+                    .inputParam(LogConstants.InputKeys.APPLICATION_NAME, oauth2Params.getApplicationName())
+                    .inputParam(OAuthConstants.LogConstants.InputKeys.REDIRECT_URI, redirectURL)
+                    .inputParam(RESPONSE_TYPE, oauth2Params.getResponseMode())
+                    .inputParam("authorized scopes", authzRespDTO.getScope())
+                    .resultMessage("Successfully generated oauth response.")
+                    .resultStatus(DiagnosticLog.ResultStatus.SUCCESS)
+                    .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION);
+            LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
         }
         sessionState.setAuthenticated(true);
         return oauthResponse;
+    }
+
+    private boolean isSubjectTokenFlow(String responseType, OAuth2AuthorizeRespDTO authzRespDTO) {
+
+        return StringUtils.isNotBlank(authzRespDTO.getSubjectToken()) &&
+                hasResponseType(responseType, OAuthConstants.SUBJECT_TOKEN);
     }
 
     private Optional<TokenBinder> getTokenBinder(String clientId) throws OAuthSystemException {
@@ -1725,10 +2051,15 @@ public class OAuth2AuthzEndpoint {
             return accessTokenExtendedAttributes;
         } catch (Exception e) {
             String msg = "Error occurred when processing consent response request from tenant: " +
-                    oauth2Params.getTenantDomain() + " application: " + oauth2Params.getClientId() + "after consent.";
+                    oauth2Params.getTenantDomain() + "after consent.";
             if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, null,
-                        OAuthConstants.LogConstants.FAILED, msg, "authorize-client", null);
+                LoggerUtils.triggerDiagnosticLogEvent(new DiagnosticLog.DiagnosticLogBuilder(
+                        OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,  "authorize-client")
+                        .inputParam(LogConstants.InputKeys.CLIENT_ID, oauth2Params.getClientId())
+                        .inputParam(LogConstants.InputKeys.ERROR_MESSAGE, e.getMessage())
+                        .resultMessage(msg)
+                        .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION)
+                        .resultStatus(DiagnosticLog.ResultStatus.FAILED));
             }
             log.warn(msg, e);
         }
@@ -1747,13 +2078,24 @@ public class OAuth2AuthzEndpoint {
         authorizationResponseDTO.getSuccessResponseDTO().setValidityPeriod(authzRespDTO.getValidityPeriod());
     }
 
+    private void setSubjectToken(OAuth2AuthorizeRespDTO authzRespDTO,
+                                 OAuthASResponse.OAuthAuthorizationResponseBuilder builder,
+                                 AuthorizationResponseDTO authorizationResponseDTO) {
+
+        builder.setParam(OAuthConstants.SUBJECT_TOKEN, authzRespDTO.getSubjectToken());
+        authorizationResponseDTO.getSuccessResponseDTO().setSubjectToken(authzRespDTO.getSubjectToken());
+    }
+
     private void setScopes(OAuth2AuthorizeRespDTO authzRespDTO,
-                           OAuthASResponse.OAuthAuthorizationResponseBuilder builder) {
+                           OAuthASResponse.OAuthAuthorizationResponseBuilder builder, AuthorizationResponseDTO
+                                   authorizationResponseDTO) {
 
         String[] scopes = authzRespDTO.getScope();
         if (scopes != null && scopes.length > 0) {
             String scopeString =  StringUtils.join(scopes, " ");
             builder.setScope(scopeString.trim());
+            Set<String> scopesSet = new HashSet<>(Arrays.asList(scopes));
+            authorizationResponseDTO.getSuccessResponseDTO().setScope(scopesSet);
         }
     }
 
@@ -1807,6 +2149,9 @@ public class OAuth2AuthzEndpoint {
         authorizationGrantCacheEntry.setTokenBindingValue(tokenBindingValue);
         authorizationGrantCacheEntry.setSessionContextIdentifier(sessionDataCacheEntry.getSessionContextIdentifier());
         authorizationGrantCacheEntry.setAccessTokenExtensionDO(tokenExtendedAttributes);
+        if (isApiBasedAuthenticationFlow(oAuthMessage)) {
+            authorizationGrantCacheEntry.setApiBasedAuthRequest(true);
+        }
 
         String[] sessionIds = sessionDataCacheEntry.getParamMap().get(FrameworkConstants.SESSION_DATA_KEY);
         if (ArrayUtils.isNotEmpty(sessionIds)) {
@@ -1828,6 +2173,12 @@ public class OAuth2AuthzEndpoint {
         authorizationGrantCacheEntry.setAuthorizationCode(code);
         boolean isRequestObjectFlow = sessionDataCacheEntry.getoAuth2Parameters().isRequestObjectFlow();
         authorizationGrantCacheEntry.setRequestObjectFlow(isRequestObjectFlow);
+        authorizationGrantCacheEntry.setFederatedTokens(sessionDataCacheEntry.getFederatedTokens());
+        sessionDataCacheEntry.setFederatedTokens(null);
+        Map<ClaimMapping, String> mappedRemoteClaims =  sessionDataCacheEntry.getMappedRemoteClaims();
+        if (mappedRemoteClaims != null) {
+            authorizationGrantCacheEntry.setMappedRemoteClaims(mappedRemoteClaims);
+        }
         oAuthMessage.setAuthorizationGrantCacheEntry(authorizationGrantCacheEntry);
     }
 
@@ -1858,7 +2209,6 @@ public class OAuth2AuthzEndpoint {
 
         OAuth2ClientValidationResponseDTO validationResponse = validateClient(oAuthMessage);
 
-
         if (!validationResponse.isValidClient()) {
             EndpointUtil.triggerOnRequestValidationFailure(oAuthMessage, validationResponse);
             return getErrorPageURL(oAuthMessage.getRequest(), validationResponse.getErrorCode(), OAuth2ErrorCodes
@@ -1866,11 +2216,13 @@ public class OAuth2AuthzEndpoint {
         } else {
             populateValidationResponseWithAppDetail(oAuthMessage, validationResponse);
             if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                Map<String, Object> logParams = new HashMap<>();
-                logParams.put("clientId", oAuthMessage.getClientId());
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, logParams,
-                        OAuthConstants.LogConstants.SUCCESS, "OAuth client validation is successful.",
-                        "validate-oauth-client", null);
+                LoggerUtils.triggerDiagnosticLogEvent(new DiagnosticLog.DiagnosticLogBuilder(
+                        OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                        OAuthConstants.LogConstants.ActionIDs.VALIDATE_OAUTH_CLIENT)
+                        .inputParam(LogConstants.InputKeys.CLIENT_ID, oAuthMessage.getClientId())
+                        .resultMessage("OAuth client validation is successful.")
+                        .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION)
+                        .resultStatus(DiagnosticLog.ResultStatus.SUCCESS));
             }
             String tenantDomain = EndpointUtil.getSPTenantDomainFromClientId(oAuthMessage.getClientId());
             setSPAttributeToRequest(oAuthMessage.getRequest(), validationResponse.getApplicationName(), tenantDomain);
@@ -1879,13 +2231,14 @@ public class OAuth2AuthzEndpoint {
         OAuthAuthzRequest oauthRequest = getOAuthAuthzRequest(oAuthMessage.getRequest());
 
         OAuth2Parameters params = new OAuth2Parameters();
-        String sessionDataKey = UUIDGenerator.generateUUID();
+        String sessionDataKey = UUID.randomUUID().toString();
         params.setSessionDataKey(sessionDataKey);
         String redirectURI = populateOauthParameters(params, oAuthMessage, validationResponse, oauthRequest);
         if (redirectURI != null) {
             return redirectURI;
         }
-
+        // Check whether PAR should be mandated in  the request.
+        checkPARMandatory(params, oAuthMessage);
         String prompt = oauthRequest.getParam(OAuthConstants.OAuth20Params.PROMPT);
         params.setPrompt(prompt);
 
@@ -1898,11 +2251,21 @@ public class OAuth2AuthzEndpoint {
             validateNonceParameter(params.getNonce());
         }
 
+        if (isFapiConformant(params.getClientId())) {
+            EndpointUtil.validateFAPIAllowedResponseTypeAndMode(params.getResponseType(), params.getResponseMode());
+        }
+
         addDataToSessionCache(oAuthMessage, params, sessionDataKey);
 
-        LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, null,
-                OAuthConstants.LogConstants.SUCCESS, "OIDC request input parameter validation is successful.",
-                "validate-input-parameters", null);
+        if (LoggerUtils.isDiagnosticLogsEnabled()) {
+            LoggerUtils.triggerDiagnosticLogEvent(new DiagnosticLog.DiagnosticLogBuilder(
+                    OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                    OAuthConstants.LogConstants.ActionIDs.VALIDATE_INPUT_PARAMS)
+                    .inputParam(LogConstants.InputKeys.CLIENT_ID, params.getClientId())
+                    .resultMessage("OIDC request input parameter validation is successful.")
+                    .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION)
+                    .resultStatus(DiagnosticLog.ResultStatus.SUCCESS));
+        }
 
         try {
             oAuthMessage.getRequest().setAttribute(FrameworkConstants.RequestParams.FLOW_STATUS, AuthenticatorFlowStatus
@@ -1936,79 +2299,6 @@ public class OAuth2AuthzEndpoint {
     }
 
     /**
-     * Method to check whether the configured OAuthAuthzRequestImplementation is the default implementation.
-     *
-     * @return boolean whether the default class name is configured.
-     */
-    private boolean isDefaultOAuthAuthzRequestClassConfigured() {
-
-        String oauthAuthzRequestClassName = OAuthServerConfiguration.getInstance().getOAuthAuthzRequestClassName();
-        return OAuthServerConfiguration.DEFAULT_OAUTH_AUTHZ_REQUEST_CLASSNAME.equals(oauthAuthzRequestClassName);
-    }
-
-    /**
-     * Load OAuthAuthzRequest class.
-     *
-     * @return OAuthAuthzRequest Class.
-     * @throws ClassNotFoundException when configured class name is invalid.
-     */
-    private static Class<? extends OAuthAuthzRequest> getOAuthAuthzRequestClass() throws ClassNotFoundException {
-
-        if (oAuthAuthzRequestClass == null) {
-
-            String oauthAuthzRequestClassName =
-                    OAuthServerConfiguration.getInstance().getOAuthAuthzRequestClassName();
-            oAuthAuthzRequestClass = (Class<? extends OAuthAuthzRequest>) Thread.currentThread()
-                    .getContextClassLoader().loadClass(oauthAuthzRequestClassName);
-
-        }
-        return oAuthAuthzRequestClass;
-    }
-
-    /**
-     * Returns an instance of OAuthAuthzRequest. If the configured classname is invalid the default implementation
-     * will be returned.
-     *
-     * @param request http servlet request.
-     * @return instance of OAuthAuthzRequest.
-     * @throws OAuthProblemException thrown when initializing the OAuthAuthzRequestClass instance.
-     * @throws OAuthSystemException  thrown when initializing the OAuthAuthzRequestClass instance.
-     */
-    private OAuthAuthzRequest getOAuthAuthzRequest(HttpServletRequest request)
-            throws OAuthProblemException, OAuthSystemException {
-
-        OAuthAuthzRequest oAuthAuthzRequest;
-
-        if (isDefaultOAuthAuthzRequestClassConfigured()) {
-            oAuthAuthzRequest = new CarbonOAuthAuthzRequest(request);
-        } else {
-            try {
-                Class<? extends OAuthAuthzRequest> clazz = getOAuthAuthzRequestClass();
-                // Validations will be performed when initializing the class instance.
-                Constructor<?> constructor = clazz.getConstructor(HttpServletRequest.class);
-                oAuthAuthzRequest = (OAuthAuthzRequest) constructor.newInstance(request);
-            } catch (InvocationTargetException e) {
-                // Handle OAuthProblemException & OAuthSystemException thrown from extended class.
-                if (e.getTargetException() instanceof OAuthProblemException) {
-                    throw (OAuthProblemException) e.getTargetException();
-                } else if (e.getTargetException() instanceof OAuthSystemException) {
-                    throw (OAuthSystemException) e.getTargetException();
-                } else {
-                    log.warn("Failed to initiate OAuthAuthzRequest from identity.xml. " +
-                            "Hence initiating the default implementation");
-                    oAuthAuthzRequest = new CarbonOAuthAuthzRequest(request);
-                }
-            } catch (ClassNotFoundException | InstantiationException | IllegalAccessException |
-                     NoSuchMethodException e) {
-                log.warn("Failed to initiate OAuthAuthzRequest from identity.xml. " +
-                        "Hence initiating the default implementation");
-                oAuthAuthzRequest = new CarbonOAuthAuthzRequest(request);
-            }
-        }
-        return oAuthAuthzRequest;
-    }
-
-    /**
      * Checks whether the given authentication flow requires {@code nonce} as a mandatory parameter.
      *
      * @param responseType Response type from the authentication request.
@@ -2031,14 +2321,20 @@ public class OAuth2AuthzEndpoint {
      */
     private void validateNonceParameter(String nonce) throws OAuthProblemException {
 
+        DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = null;
+        if (LoggerUtils.isDiagnosticLogsEnabled()) {
+            diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                    OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                    OAuthConstants.LogConstants.ActionIDs.VALIDATE_INPUT_PARAMS);
+            diagnosticLogBuilder.inputParam("nonce", nonce)
+                    .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION);
+        }
         if (StringUtils.isBlank(nonce)) {
-            if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                Map<String, Object> logParams = new HashMap<>();
-                logParams.put("nonce", nonce);
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, logParams,
-                        OAuthConstants.LogConstants.FAILED,
-                        "'response_type' contains 'id_token' but 'nonce' param not found.", "validate-input-parameters",
-                        null);
+            if (diagnosticLogBuilder != null) {
+                // diagnosticLogBuilder will be null if diagnostic logs are disabled.
+                diagnosticLogBuilder.resultMessage("'response_type' contains 'id_token' but 'nonce' param not found.")
+                        .resultStatus(DiagnosticLog.ResultStatus.FAILED);
+                LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
             }
             throw OAuthProblemException.error(OAuthError.TokenResponse.INVALID_REQUEST)
                     .description("\'response_type\' contains \'id_token\'; but \'nonce\' parameter not found");
@@ -2046,12 +2342,11 @@ public class OAuth2AuthzEndpoint {
         if (log.isDebugEnabled()) {
             log.debug("Mandatory " + NONCE + " parameter is successfully validated");
         }
-        if (LoggerUtils.isDiagnosticLogsEnabled()) {
-            Map<String, Object> logParams = new HashMap<>();
-            logParams.put("nonce", nonce);
-            LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, logParams,
-                    OAuthConstants.LogConstants.SUCCESS, "'nonce' parameter validation is successful.",
-                    "validate-input-parameters", null);
+        if (diagnosticLogBuilder != null) {
+            // diagnosticLogBuilder will be null if diagnostic logs are disabled.
+            diagnosticLogBuilder.resultMessage("'nonce' parameter validation is successful.")
+                    .resultStatus(DiagnosticLog.ResultStatus.SUCCESS);
+            LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
         }
     }
 
@@ -2059,9 +2354,9 @@ public class OAuth2AuthzEndpoint {
             throws RequestObjectException {
 
         String sessionDataKey = params.getSessionDataKey();
-        if (EndpointUtil.getRequestObjectService() != null) {
+        if (getRequestObjectService() != null) {
             if (requestObject != null && MapUtils.isNotEmpty(requestObject.getRequestedClaims())) {
-                EndpointUtil.getRequestObjectService().addRequestObject(params.getClientId(), sessionDataKey,
+                getRequestObjectService().addRequestObject(params.getClientId(), sessionDataKey,
                         new ArrayList(requestObject.getRequestedClaims().values()));
                 params.setRequestObjectFlow(true);
             }
@@ -2088,6 +2383,7 @@ public class OAuth2AuthzEndpoint {
         }
         sessionDataCacheEntryNew.setValidityPeriod(TimeUnit.MINUTES.toNanos(IdentityUtil.getTempDataCleanUpTimeout()));
         SessionDataCache.getInstance().addToCache(cacheKey, sessionDataCacheEntryNew);
+        oAuthMessage.setSessionDataCacheEntry(sessionDataCacheEntryNew);
     }
 
     private String analyzePromptParameter(OAuthMessage oAuthMessage, OAuth2Parameters params, String prompt) {
@@ -2095,18 +2391,25 @@ public class OAuth2AuthzEndpoint {
         List promptsList = getSupportedPromtsValues();
         boolean containsNone = (OAuthConstants.Prompt.NONE).equals(prompt);
 
+        DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = null;
+        if (LoggerUtils.isDiagnosticLogsEnabled()) {
+            diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                    OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                    OAuthConstants.LogConstants.ActionIDs.VALIDATE_INPUT_PARAMS);
+            diagnosticLogBuilder.inputParam(LogConstants.InputKeys.CLIENT_ID, params.getClientId())
+                    .inputParam(OAuthConstants.LogConstants.InputKeys.PROMPT, prompt)
+                    .configParam("serverSupportedPrompts", promptsList)
+                    .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION)
+                    .resultStatus(DiagnosticLog.ResultStatus.FAILED);
+        }
         if (StringUtils.isNotBlank(prompt)) {
             List requestedPrompts = getRequestedPromptList(prompt);
             if (!CollectionUtils.containsAny(requestedPrompts, promptsList)) {
                 String message = "Invalid prompt variables passed with the authorization request";
-                if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                    Map<String, Object> logParams = new HashMap<>();
-                    logParams.put("prompt", prompt);
-                    logParams.put("clientId", params.getClientId());
-                    Map<String, Object> configs = new HashMap<>();
-                    configs.put("serverSupportedPrompts", promptsList);
-                    LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, logParams,
-                            OAuthConstants.LogConstants.FAILED, message, "validate-input-parameters", configs);
+                if (diagnosticLogBuilder != null) {
+                    // diagnosticLogBuilder will be null if diagnostic logs are disabled.
+                    diagnosticLogBuilder.resultMessage(message);
+                    LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
                 }
                 return handleInvalidPromptValues(oAuthMessage, params, prompt, message);
             }
@@ -2117,16 +2420,10 @@ public class OAuth2AuthzEndpoint {
                     String message =
                             "Invalid prompt variable combination. The value 'none' cannot be used with others " +
                                     "prompts. Prompt: ";
-                    if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                        Map<String, Object> logParams = new HashMap<>();
-                        logParams.put("prompt", prompt);
-                        logParams.put("clientId", params.getClientId());
-                        Map<String, Object> configs = new HashMap<>();
-                        configs.put("serverSupportedPrompts", promptsList);
-                        LoggerUtils
-                                .triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, logParams,
-                                        OAuthConstants.LogConstants.FAILED, message, "validate-input-parameters",
-                                        configs);
+                    if (diagnosticLogBuilder != null) {
+                        // diagnosticLogBuilder will be null if diagnostic logs are disabled.
+                        diagnosticLogBuilder.resultMessage(message);
+                        LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
                     }
                     return handleInvalidPromptValues(oAuthMessage, params, prompt, message);
 
@@ -2178,22 +2475,30 @@ public class OAuth2AuthzEndpoint {
 
         OAuth2Parameters oAuth2Parameters = getOAuth2ParamsFromOAuthMessage(oAuthMessage);
 
+        DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = null;
+        if (LoggerUtils.isDiagnosticLogsEnabled()) {
+            String clientID = oAuth2Parameters.getClientId();
+            if (clientID == null) {
+                clientID = oAuthMessage.getClientId();
+            }
+            diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                    OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                    OAuthConstants.LogConstants.ActionIDs.VALIDATE_PKCE)
+                    .inputParam(LogConstants.InputKeys.CLIENT_ID, clientID)
+                    .inputParam("PKCE challenge", pkceChallengeCode)
+                    .inputParam("PKCE method", pkceChallengeMethod)
+                    .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION)
+                    .resultStatus(DiagnosticLog.ResultStatus.FAILED);
+        }
         // Check if PKCE is mandatory for the application
         if (validationResponse.isPkceMandatory()) {
             if (pkceChallengeCode == null || !OAuth2Util.validatePKCECodeChallenge(pkceChallengeCode,
                     pkceChallengeMethod)) {
-                if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                    Map<String, Object> params = new HashMap<>();
-                    params.put("clientId", oAuth2Parameters.getClientId());
-                    params.put("pkceChallenge", pkceChallengeCode);
-                    params.put("pkceMethod", pkceChallengeMethod);
-
-                    Map<String, Object> configs = new HashMap<>();
-                    configs.put("isPkceMandatory", "true");
-                    LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                            OAuthConstants.LogConstants.FAILED,
-                            "PKCE Challenge is not provided or is not upto RFC 7636 specification.", "validate-pkce",
-                            configs);
+                if (diagnosticLogBuilder != null) {
+                    // diagnosticLogBuilder will be null if diagnostic logs are disabled.
+                    diagnosticLogBuilder.configParam("is PKCE mandatory", "true")
+                            .resultMessage("PKCE Challenge is not provided or is not upto RFC 7636 specification.");
+                    LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
                 }
                 return getErrorPageURL(oAuthMessage.getRequest(), OAuth2ErrorCodes.INVALID_REQUEST, OAuth2ErrorCodes
                         .OAuth2SubErrorCodes.INVALID_PKCE_CHALLENGE_CODE, "PKCE is mandatory for this application. " +
@@ -2205,18 +2510,12 @@ public class OAuth2AuthzEndpoint {
         if (pkceChallengeCode != null && pkceChallengeMethod != null) {
             if (!OAuthConstants.OAUTH_PKCE_PLAIN_CHALLENGE.equals(pkceChallengeMethod) &&
                     !OAuthConstants.OAUTH_PKCE_S256_CHALLENGE.equals(pkceChallengeMethod)) {
-                if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                    Map<String, Object> params = new HashMap<>();
-                    params.put("clientId", oAuth2Parameters.getClientId());
-                    params.put("pkceChallenge", pkceChallengeCode);
-                    params.put("pkceMethod", pkceChallengeMethod);
-
-                    Map<String, Object> configs = new HashMap<>();
-                    configs.put("isPkceMandatory", Boolean.toString(validationResponse.isPkceMandatory()));
-                    LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                            OAuthConstants.LogConstants.FAILED,
-                            "Unsupported PKCE Challenge Method.", "validate-pkce",
-                            configs);
+                if (diagnosticLogBuilder != null) {
+                    // diagnosticLogBuilder will be null if diagnostic logs are disabled.
+                    diagnosticLogBuilder.configParam("is PKCE mandatory",
+                                    Boolean.toString(validationResponse.isPkceMandatory()))
+                            .resultMessage("Unsupported PKCE Challenge Method.");
+                    LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
                 }
                 return getErrorPageURL(oAuthMessage.getRequest(), OAuth2ErrorCodes.INVALID_REQUEST, OAuth2ErrorCodes
                                 .OAuth2SubErrorCodes.INVALID_PKCE_CHALLENGE_CODE,
@@ -2227,19 +2526,13 @@ public class OAuth2AuthzEndpoint {
         // Check if "plain" transformation algorithm is disabled for the application
         if (pkceChallengeCode != null && !validationResponse.isPkceSupportPlain()) {
             if (pkceChallengeMethod == null || OAuthConstants.OAUTH_PKCE_PLAIN_CHALLENGE.equals(pkceChallengeMethod)) {
-                if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                    Map<String, Object> params = new HashMap<>();
-                    params.put("clientId", oAuth2Parameters.getClientId());
-                    params.put("pkceChallenge", pkceChallengeCode);
-                    params.put("pkceMethod", pkceChallengeMethod);
-
-                    Map<String, Object> configs = new HashMap<>();
-                    configs.put("isPkceMandatory", Boolean.toString(validationResponse.isPkceMandatory()));
-                    configs.put("isPkceSupportPlain", "false");
-                    LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                            OAuthConstants.LogConstants.FAILED,
-                            "OAuth client does not support 'plain' transformation algorithm.", "validate-pkce",
-                            configs);
+                if (diagnosticLogBuilder != null) {
+                    // diagnosticLogBuilder will be null if diagnostic logs are disabled.
+                    diagnosticLogBuilder.configParam("is PKCE mandatory",
+                                    Boolean.toString(validationResponse.isPkceMandatory()))
+                            .configParam("is PKCE support plain", "false")
+                            .resultMessage("OAuth client does not support 'plain' transformation algorithm.");
+                    LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
                 }
                 return getErrorPageURL(oAuthMessage.getRequest(), OAuth2ErrorCodes.INVALID_REQUEST, OAuth2ErrorCodes
                         .OAuth2SubErrorCodes.INVALID_PKCE_CHALLENGE_CODE, "This application does not support " +
@@ -2250,24 +2543,22 @@ public class OAuth2AuthzEndpoint {
         // If PKCE challenge code was sent, check if the code challenge is upto specifications
         if (pkceChallengeCode != null && !OAuth2Util.validatePKCECodeChallenge(pkceChallengeCode,
                 pkceChallengeMethod)) {
-            if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                Map<String, Object> params = new HashMap<>();
-                params.put("clientId", oAuth2Parameters.getClientId());
-                params.put("pkceChallenge", pkceChallengeCode);
-                params.put("pkceMethod", pkceChallengeMethod);
-
-                Map<String, Object> configs = new HashMap<>();
-                configs.put("isPkceMandatory", Boolean.toString(validationResponse.isPkceMandatory()));
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                        OAuthConstants.LogConstants.FAILED, "Code challenge used is not up to RFC 7636 specifications.",
-                        "validate-pkce", configs);
+            if (diagnosticLogBuilder != null) {
+                // diagnosticLogBuilder will be null if diagnostic logs are disabled.
+                diagnosticLogBuilder.configParam("is PKCE mandatory",
+                                Boolean.toString(validationResponse.isPkceMandatory()))
+                        .resultMessage("Code challenge used is not up to RFC 7636 specifications.");
+                LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
             }
             return getErrorPageURL(oAuthMessage.getRequest(), OAuth2ErrorCodes.INVALID_REQUEST, OAuth2ErrorCodes
                     .OAuth2SubErrorCodes.INVALID_PKCE_CHALLENGE_CODE, "Code challenge used is not up to RFC 7636 " +
                     "specifications.", null, oAuth2Parameters);
         }
-        LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, null,
-                OAuthConstants.LogConstants.SUCCESS, "PKCE validation is successful.", "validate-pkce", null);
+        if (diagnosticLogBuilder != null) {
+            diagnosticLogBuilder.resultMessage("PKCE validation is successful.")
+                    .resultStatus(DiagnosticLog.ResultStatus.SUCCESS);
+            LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
+        }
         return null;
     }
 
@@ -2338,7 +2629,17 @@ public class OAuth2AuthzEndpoint {
             params.setEssentialClaims(oauthRequest.getParam(CLAIMS));
         }
 
+        if (AuthorizationDetailsUtils.isRichAuthorizationRequest(oauthRequest)) {
+
+            final String authorizationDetailsJson = oauthRequest
+                    .getParam(AuthorizationDetailsConstants.AUTHORIZATION_DETAILS);
+            params.setAuthorizationDetails(new AuthorizationDetails(authorizationDetailsJson));
+        }
+
         handleMaxAgeParameter(oauthRequest, params);
+
+        Object isMtls = oAuthMessage.getRequest().getAttribute(OAuthConstants.IS_MTLS_REQUEST);
+        params.setIsMtlsRequest(isMtls != null && Boolean.parseBoolean(isMtls.toString()));
 
         /*
             OIDC Request object will supersede parameters sent in the OAuth Authorization request. So handling the
@@ -2376,6 +2677,7 @@ public class OAuth2AuthzEndpoint {
             params.setPkceCodeChallenge(pkceChallengeCode);
             params.setPkceCodeChallengeMethod(pkceChallengeMethod);
         }
+        params.setRequestedSubjectId(oAuthMessage.getRequestedSubjectId());
 
         return null;
     }
@@ -2419,12 +2721,14 @@ public class OAuth2AuthzEndpoint {
                     log.debug("Invalid max_age parameter: '" + maxAgeParam + "' sent in the authorization request.");
                 }
                 if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                    Map<String, Object> logParams = new HashMap<>();
-                    logParams.put("clientId", params.getClientId());
-                    logParams.put("maxAge", maxAgeParam);
-                    LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, logParams,
-                            OAuthConstants.LogConstants.FAILED, "Invalid max_age paramter value",
-                            "validate-input-parameters", null);
+                    LoggerUtils.triggerDiagnosticLogEvent(new DiagnosticLog.DiagnosticLogBuilder(
+                            OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                            OAuthConstants.LogConstants.ActionIDs.VALIDATE_INPUT_PARAMS)
+                            .inputParam(LogConstants.InputKeys.CLIENT_ID, params.getClientId())
+                            .inputParam("max age", maxAgeParam)
+                            .resultMessage("Invalid max_age parameter value.")
+                            .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION)
+                            .resultStatus(DiagnosticLog.ResultStatus.FAILED));
                 }
                 throw new InvalidRequestException("Invalid max_age parameter value sent in the authorization request" +
                         ".", OAuth2ErrorCodes.INVALID_REQUEST, OAuth2ErrorCodes.OAuth2SubErrorCodes.INVALID_PARAMETERS);
@@ -2443,6 +2747,14 @@ public class OAuth2AuthzEndpoint {
         } else if (isRequestParameter(oauthRequest)) {
             requestObjValue = oauthRequest.getParam(REQUEST);
         }
+        /* Mandate request object for FAPI requests.
+           https://openid.net/specs/openid-financial-api-part-2-1_0.html#authorization-server (5.2.2-1)  */
+        if (isFapiConformant(oAuthMessage.getClientId())) {
+            if (requestObjValue == null) {
+                throw new InvalidRequestException("Request Object is mandatory for FAPI Conformant Applications.",
+                        OAuth2ErrorCodes.INVALID_REQUEST, "Request object is missing.");
+            }
+        }
 
         if (StringUtils.isNotEmpty(requestObjValue)) {
             handleRequestObject(oAuthMessage, oauthRequest, parameters);
@@ -2455,20 +2767,20 @@ public class OAuth2AuthzEndpoint {
 
     private void validateRequestObjectParams(OAuthAuthzRequest oauthRequest) throws RequestObjectException {
 
-        // With in the same request it can not be used both request parameter and request_uri parameter.
-        if (Boolean.parseBoolean(oauthRequest.getParam(
-                OAuthConstants.ALLOW_REQUEST_URI_AND_REQUEST_OBJECT_IN_REQUEST))) {
-            return;
-        }
         if (StringUtils.isNotEmpty(oauthRequest.getParam(REQUEST)) && StringUtils.isNotEmpty(oauthRequest.getParam
                 (REQUEST_URI))) {
             if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                Map<String, Object> params = new HashMap<>();
-                params.put("request", oauthRequest.getParam(REQUEST));
-                params.put("request_uri", oauthRequest.getParam(REQUEST_URI));
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                        OAuthConstants.LogConstants.FAILED, "request and request_uri parameters associated with the " +
-                                "same authorization request", "validate-oauth-client", null);
+                LoggerUtils.triggerDiagnosticLogEvent(new DiagnosticLog.DiagnosticLogBuilder(
+                        OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                        OAuthConstants.LogConstants.ActionIDs.VALIDATE_OAUTH_CLIENT)
+                        .inputParam("request", oauthRequest.getParam(REQUEST))
+                        .inputParam(OAuthConstants.LogConstants.InputKeys.REDIRECT_URI,
+                                oauthRequest.getParam(REQUEST_URI))
+                        .resultMessage("'request' and 'request_uri' parameters associated with the same " +
+                                "authorization request.")
+                        .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION)
+                        .resultStatus(DiagnosticLog.ResultStatus.FAILED
+                ));
             }
             throw new RequestObjectException(OAuth2ErrorCodes.INVALID_REQUEST, "Both request and " +
                     "request_uri parameters can not be associated with the same authorization request.");
@@ -2488,17 +2800,25 @@ public class OAuth2AuthzEndpoint {
               When the request parameter is used, the OpenID Connect request parameter values contained in the JWT
               supersede those passed using the OAuth 2.0 request syntax
              */
+        boolean isFapiConformant = isFapiConformant(oAuthMessage.getClientId());
+        // If FAPI conformant, claims outside request object should be ignored.
         overrideAuthzParameters(oAuthMessage, parameters, oauthRequest.getParam(REQUEST),
-                oauthRequest.getParam(REQUEST_URI), requestObject);
+                oauthRequest.getParam(REQUEST_URI), requestObject, isFapiConformant);
 
         // If the redirect uri was not given in auth request the registered redirect uri will be available here,
         // so validating if the registered redirect uri is a single uri that can be properly redirected.
         if (StringUtils.isBlank(parameters.getRedirectURI()) ||
                 StringUtils.startsWith(parameters.getRedirectURI(), REGEX_PATTERN)) {
-            LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, null,
-                    OAuthConstants.LogConstants.FAILED, "Redirect URI is not present in the authorization request.",
-                    "validate-input-parameters", null);
-            throw new InvalidRequestException("Redirect URI is not present in the authorization request.",
+            if (LoggerUtils.isDiagnosticLogsEnabled()) {
+                LoggerUtils.triggerDiagnosticLogEvent(new DiagnosticLog.DiagnosticLogBuilder(
+                        OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                        OAuthConstants.LogConstants.ActionIDs.VALIDATE_INPUT_PARAMS)
+                        .resultMessage("Redirect URI is not present in the authorization request.")
+                        .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION)
+                        .resultStatus(DiagnosticLog.ResultStatus.FAILED));
+            }
+            throw new InvalidRequestException(
+                    OAuthConstants.OAuthError.AuthorizationResponsei18nKey.INVALID_REDIRECT_URI,
                     OAuth2ErrorCodes.INVALID_REQUEST, OAuth2ErrorCodes.OAuth2SubErrorCodes.INVALID_REDIRECT_URI);
         }
         persistRequestObject(parameters, requestObject);
@@ -2506,17 +2826,18 @@ public class OAuth2AuthzEndpoint {
 
     private void overrideAuthzParameters(OAuthMessage oAuthMessage, OAuth2Parameters params,
                                          String requestParameterValue,
-                                         String requestURIParameterValue, RequestObject requestObject) {
+                                         String requestURIParameterValue, RequestObject requestObject,
+                                         boolean ignoreClaimsOutsideRequestObject) {
 
         if (StringUtils.isNotBlank(requestParameterValue) || StringUtils.isNotBlank(requestURIParameterValue)) {
-            replaceIfPresent(requestObject, REDIRECT_URI, params::setRedirectURI);
-            replaceIfPresent(requestObject, NONCE, params::setNonce);
-            replaceIfPresent(requestObject, STATE, params::setState);
-            replaceIfPresent(requestObject, DISPLAY, params::setDisplay);
-            replaceIfPresent(requestObject, RESPONSE_MODE, params::setResponseMode);
-            replaceIfPresent(requestObject, LOGIN_HINT, params::setLoginHint);
-            replaceIfPresent(requestObject, ID_TOKEN_HINT, params::setIDTokenHint);
-            replaceIfPresent(requestObject, PROMPT, params::setPrompt);
+            replaceIfPresent(requestObject, REDIRECT_URI, params::setRedirectURI, ignoreClaimsOutsideRequestObject);
+            replaceIfPresent(requestObject, NONCE, params::setNonce, ignoreClaimsOutsideRequestObject);
+            replaceIfPresent(requestObject, STATE, params::setState, ignoreClaimsOutsideRequestObject);
+            replaceIfPresent(requestObject, DISPLAY, params::setDisplay, ignoreClaimsOutsideRequestObject);
+            replaceIfPresent(requestObject, RESPONSE_MODE, params::setResponseMode, ignoreClaimsOutsideRequestObject);
+            replaceIfPresent(requestObject, LOGIN_HINT, params::setLoginHint, ignoreClaimsOutsideRequestObject);
+            replaceIfPresent(requestObject, ID_TOKEN_HINT, params::setIDTokenHint, ignoreClaimsOutsideRequestObject);
+            replaceIfPresent(requestObject, PROMPT, params::setPrompt, ignoreClaimsOutsideRequestObject);
 
             if (requestObject.getClaim(CLAIMS) instanceof net.minidev.json.JSONObject) {
                 // Claims in the request object is in the type of net.minidev.json.JSONObject,
@@ -2528,8 +2849,8 @@ public class OAuth2AuthzEndpoint {
             if (isPkceSupportEnabled()) {
                 // If code_challenge and code_challenge_method is sent inside the request object then add them to
                 // Oauth2 parameters.
-                replaceIfPresent(requestObject, CODE_CHALLENGE, params::setPkceCodeChallenge);
-                replaceIfPresent(requestObject, CODE_CHALLENGE_METHOD, params::setPkceCodeChallengeMethod);
+                replaceIfPresent(requestObject, CODE_CHALLENGE, params::setPkceCodeChallenge, false);
+                replaceIfPresent(requestObject, CODE_CHALLENGE_METHOD, params::setPkceCodeChallengeMethod, false);
             }
 
             if (StringUtils.isNotEmpty(requestObject.getClaimValue(SCOPE))) {
@@ -2553,10 +2874,15 @@ public class OAuth2AuthzEndpoint {
                     oAuthMessage.getRequest().setAttribute(ACR_VALUES, acrRequestedValues);
                 }
             }
-            LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, null,
-                    OAuthConstants.LogConstants.SUCCESS,
-                    "Successfully overridden the parameters in authorization request with the parameters " +
-                            "available in request object.", "override-authz-parameters", null);
+            if (LoggerUtils.isDiagnosticLogsEnabled()) {
+                LoggerUtils.triggerDiagnosticLogEvent(new DiagnosticLog.DiagnosticLogBuilder(
+                        OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                        OAuthConstants.LogConstants.ActionIDs.OVERRIDE_AUTHZ_PARAMS)
+                        .resultMessage("Successfully overridden the parameters in authorization request with the " +
+                                "parameters available in request object.")
+                        .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION)
+                        .resultStatus(DiagnosticLog.ResultStatus.SUCCESS));
+            }
         }
     }
 
@@ -2588,11 +2914,14 @@ public class OAuth2AuthzEndpoint {
         return acrRequestedValues;
     }
 
-    private void replaceIfPresent(RequestObject requestObject, String claim, Consumer<String> consumer) {
+    private void replaceIfPresent(RequestObject requestObject, String claim, Consumer<String> consumer,
+                                  boolean ignoreClaimsOutsideRequestObject) {
 
         String claimValue = requestObject.getClaimValue(claim);
         if (StringUtils.isNotEmpty(claimValue)) {
             consumer.accept(claimValue);
+        } else if (ignoreClaimsOutsideRequestObject) {
+            consumer.accept(null);
         }
     }
 
@@ -2673,21 +3002,57 @@ public class OAuth2AuthzEndpoint {
         consent page. */
         HttpRequestHeaderHandler httpRequestHeaderHandler = new HttpRequestHeaderHandler(oAuthMessage.getRequest());
         OAuth2AuthorizeReqDTO authzReqDTO =
-                buildAuthRequest(oauth2Params, oAuthMessage.getSessionDataCacheEntry(), httpRequestHeaderHandler);
+                buildAuthRequest(oauth2Params, oAuthMessage.getSessionDataCacheEntry(), httpRequestHeaderHandler,
+                        oAuthMessage.getRequest());
         try {
+            if (LoggerUtils.isDiagnosticLogsEnabled()) {
+                DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                        OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                        OAuthConstants.LogConstants.ActionIDs.VALIDATE_SCOPES_BEFORE_CONSENT);
+                diagnosticLogBuilder.inputParam(LogConstants.InputKeys.CLIENT_ID, oauth2Params.getClientId())
+                        .inputParam(LogConstants.InputKeys.APPLICATION_NAME, oauth2Params.getApplicationName())
+                        .inputParam("scopes to be validate", oauth2Params.getScopes())
+                        .resultStatus(DiagnosticLog.ResultStatus.SUCCESS)
+                        .resultMessage("Scope validation started.")
+                        .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION);
+                LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
+            }
             validateScopesBeforeConsent(oAuthMessage, oauth2Params, authzReqDTO);
+            if (LoggerUtils.isDiagnosticLogsEnabled()) {
+                DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                        OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                        OAuthConstants.LogConstants.ActionIDs.VALIDATE_SCOPES_BEFORE_CONSENT);
+                diagnosticLogBuilder.inputParam(LogConstants.InputKeys.CLIENT_ID, oauth2Params.getClientId())
+                        .inputParam(LogConstants.InputKeys.APPLICATION_NAME, oauth2Params.getApplicationName())
+                        .inputParam("scopes after validation", oauth2Params.getScopes())
+                        .resultStatus(DiagnosticLog.ResultStatus.SUCCESS)
+                        .resultMessage("Scope validation completed.")
+                        .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION);
+                LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
+            }
         } catch (IdentityOAuth2UnauthorizedScopeException e) {
-            LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, null,
-                    OAuthConstants.LogConstants.FAILED, "Error occurred when processing the authorization " +
-                            "request from tenant: " + oauth2Params.getTenantDomain() + " application: " +
-                            oauth2Params.getClientId() + "before consent.",
-                    "authorize-client", null);
             OAuth2AuthorizeRespDTO authorizeRespDTO = new OAuth2AuthorizeRespDTO();
             authorizeRespDTO.setErrorCode(e.getErrorCode());
             authorizeRespDTO.setErrorMsg(e.getMessage());
             authorizeRespDTO.setCallbackURI(authzReqDTO.getCallbackUrl());
             authorizationResponseDTO.setError(HttpServletResponse.SC_FOUND, e.getMessage(), e.getErrorCode());
             return handleAuthorizationFailureBeforeConsent(oAuthMessage, oauth2Params, authorizeRespDTO);
+        }
+
+        try {
+            validateAuthorizationDetailsBeforeConsent(oAuthMessage, oauth2Params);
+        } catch (AuthorizationDetailsProcessingException e) {
+            log.debug("Error occurred while validating authorization details. Caused by, ", e);
+
+            authorizationResponseDTO.setError(HttpServletResponse.SC_FOUND,
+                    AuthorizationDetailsConstants.VALIDATION_FAILED_ERR_MSG,
+                    AuthorizationDetailsConstants.VALIDATION_FAILED_ERR_CODE);
+
+            OAuth2AuthorizeRespDTO oAuth2AuthorizeRespDTO = new OAuth2AuthorizeRespDTO();
+            oAuth2AuthorizeRespDTO.setErrorMsg(AuthorizationDetailsConstants.VALIDATION_FAILED_ERR_MSG);
+            oAuth2AuthorizeRespDTO.setErrorCode(AuthorizationDetailsConstants.VALIDATION_FAILED_ERR_CODE);
+            oAuth2AuthorizeRespDTO.setCallbackURI(authzReqDTO.getCallbackUrl());
+            return handleAuthorizationFailureBeforeConsent(oAuthMessage, oauth2Params, oAuth2AuthorizeRespDTO);
         }
 
         boolean hasUserApproved = isUserAlreadyApproved(oauth2Params, authenticatedUser);
@@ -2697,24 +3062,24 @@ public class OAuth2AuthzEndpoint {
             String clientId = oauth2Params.getClientId();
             OpenIDConnectUserRPStore.getInstance().removeConsentForUser(authenticatedUser, clientId);
             if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                Map<String, Object> params = new HashMap<>();
-                params.put("clientId", oauth2Params.getClientId());
-                params.put("prompt", oauth2Params.getPrompt());
-                if (authenticatedUser != null) {
-                    try {
-                        params.put("user", authenticatedUser.getUserId());
-                    } catch (UserIdNotFoundException e) {
-                        if (StringUtils.isNotBlank(authenticatedUser.getAuthenticatedSubjectIdentifier())) {
-                            params.put("user", LoggerUtils.isLogMaskingEnable ? LoggerUtils.getMaskedContent(
-                                    authenticatedUser.getAuthenticatedSubjectIdentifier()) : authenticatedUser
-                                    .getAuthenticatedSubjectIdentifier());
-                        }
+                DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                        OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                        OAuthConstants.LogConstants.ActionIDs.REMOVE_USER_CONSENT);
+                diagnosticLogBuilder.inputParam(LogConstants.InputKeys.CLIENT_ID, oauth2Params.getClientId())
+                        .inputParam(OAuthConstants.LogConstants.InputKeys.PROMPT, oauth2Params.getPrompt())
+                        .resultMessage("'prompt' contains consent. Hence existing user consent is revoked.")
+                        .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION)
+                        .resultStatus(DiagnosticLog.ResultStatus.SUCCESS);
+                try {
+                    diagnosticLogBuilder.inputParam(LogConstants.InputKeys.USER_ID, authenticatedUser.getUserId());
+                } catch (UserIdNotFoundException e) {
+                    if (StringUtils.isNotBlank(authenticatedUser.getAuthenticatedSubjectIdentifier())) {
+                        diagnosticLogBuilder.inputParam(LogConstants.InputKeys.USER, LoggerUtils.isLogMaskingEnable ?
+                                LoggerUtils.getMaskedContent(authenticatedUser.getAuthenticatedSubjectIdentifier())
+                                : authenticatedUser.getAuthenticatedSubjectIdentifier());
                     }
                 }
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                        OAuthConstants.LogConstants.SUCCESS,
-                        "'prompt' contains consent. Hence existing user consent is revoked.", "remove-user-consent",
-                        null);
+                LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
             }
             if (log.isDebugEnabled()) {
                 log.debug("Prompt parameter contains 'consent'. Existing consents for user: "
@@ -2770,6 +3135,9 @@ public class OAuth2AuthzEndpoint {
 
     private OAuth2Parameters getOauth2Params(OAuthMessage oAuthMessage) {
 
+        if (oAuthMessage.getSessionDataCacheEntry() == null) {
+            return null;
+        }
         return oAuthMessage.getSessionDataCacheEntry().getoAuth2Parameters();
     }
 
@@ -2784,9 +3152,7 @@ public class OAuth2AuthzEndpoint {
                                          authorizationResponseDTO)
             throws OAuthSystemException, ConsentHandlingFailedException {
 
-        ServiceProvider serviceProvider = getServiceProvider(oauth2Params.getClientId());
-
-        if (isConsentSkipped(serviceProvider)) {
+        if (isConsentSkipped(oauth2Params)) {
             sessionState.setAddSessionState(true);
             return handleUserConsent(oAuthMessage, APPROVE, sessionState, oauth2Params, authorizationResponseDTO);
         } else if (hasUserApproved) {
@@ -2833,11 +3199,13 @@ public class OAuth2AuthzEndpoint {
             preConsent = handlePreConsentIncludingExistingConsents(oauth2Params, user);
         }
         if (LoggerUtils.isDiagnosticLogsEnabled()) {
-            Map<String, Object> params = new HashMap<>();
-            params.put("clientId", clientId);
-            LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                    OAuthConstants.LogConstants.SUCCESS, "Redirecting to Consent Page URL.", "prompt-consent-page",
-                    null);
+            LoggerUtils.triggerDiagnosticLogEvent(new DiagnosticLog.DiagnosticLogBuilder(
+                    OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                    OAuthConstants.LogConstants.ActionIDs.PROMPT_CONSENT_PAGE)
+                    .inputParam(LogConstants.InputKeys.CLIENT_ID, clientId)
+                    .resultMessage("Redirecting to Consent Page URL.")
+                    .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION)
+                    .resultStatus(DiagnosticLog.ResultStatus.SUCCESS));
         }
         return getUserConsentURL(sessionDataKey, oauth2Params, user, preConsent, oAuthMessage);
     }
@@ -2855,12 +3223,13 @@ public class OAuth2AuthzEndpoint {
             // http://openid.net/specs/openid-connect-core-1_0.html#AuthRequest
             sessionState.setAddSessionState(true);
             if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                Map<String, Object> params = new HashMap<>();
-                params.put("clientId", oauth2Params.getClientId());
-                params.put("prompt", oauth2Params.getPrompt());
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                        OAuthConstants.LogConstants.FAILED,
-                        "Request with 'prompt=none' but user session does not exist", "validate-user-session", null);
+                LoggerUtils.triggerDiagnosticLogEvent(new DiagnosticLog.DiagnosticLogBuilder(
+                        OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                        OAuthConstants.LogConstants.ActionIDs.VALIDATE_USER_SESSION)
+                        .inputParam(LogConstants.InputKeys.CLIENT_ID, oauth2Params.getClientId())
+                        .resultMessage("Request with 'prompt=none' but user session does not exist.")
+                        .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION)
+                        .resultStatus(DiagnosticLog.ResultStatus.FAILED));
             }
             throw OAuthProblemException.error(OAuth2ErrorCodes.LOGIN_REQUIRED,
                     "Request with \'prompt=none\' but user session does not exist");
@@ -2880,13 +3249,17 @@ public class OAuth2AuthzEndpoint {
     /**
      * Consent page can be skipped by setting OpenIDConnect configuration or by setting SP property.
      *
-     * @param serviceProvider Service provider related to this request.
+     * @param oauth2Params oauth2 params related to this request.
      * @return A boolean stating whether consent page is skipped or not.
      */
-    private boolean isConsentSkipped(ServiceProvider serviceProvider) {
+    private boolean isConsentSkipped(OAuth2Parameters oauth2Params) throws OAuthSystemException {
 
+        ServiceProvider serviceProvider = getServiceProvider(oauth2Params.getClientId());
+        boolean isApiBasedAuthenticationFlow = isApiBasedAuthenticationFlow(oauth2Params);
+
+        // Consent handling is skipped for API based authentication flow.
         return getOAuthServerConfiguration().getOpenIDConnectSkipeUserConsentConfig()
-                || FrameworkUtils.isConsentPageSkippedForSP(serviceProvider);
+                || FrameworkUtils.isConsentPageSkippedForSP(serviceProvider) || isApiBasedAuthenticationFlow;
     }
 
     private boolean isConsentFromUserRequired(String preConsentQueryParams) {
@@ -2927,12 +3300,12 @@ public class OAuth2AuthzEndpoint {
         ServiceProvider serviceProvider = getServiceProvider(clientId);
 
         Map<String, Object> params = new HashMap<>();
-        params.put("clientId", clientId);
+        params.put(LogConstants.InputKeys.CLIENT_ID, clientId);
         try {
-            params.put("user", user.getUserId());
+            params.put(LogConstants.InputKeys.USER_ID, user.getUserId());
         } catch (UserIdNotFoundException e) {
             if (StringUtils.isNotBlank(user.getAuthenticatedSubjectIdentifier())) {
-                params.put("user", LoggerUtils.isLogMaskingEnable ? LoggerUtils.getMaskedContent(
+                params.put(LogConstants.InputKeys.USER, LoggerUtils.isLogMaskingEnable ? LoggerUtils.getMaskedContent(
                         user.getAuthenticatedSubjectIdentifier()) : user.getAuthenticatedSubjectIdentifier());
             }
         }
@@ -2948,19 +3321,31 @@ public class OAuth2AuthzEndpoint {
                         + spTenantDomain + " for user: " + user.toFullQualifiedUsername());
             }
             if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                Map<String, Object> configs = new HashMap<>();
-                configs.put("skipConsent", "true");
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                        OAuthConstants.LogConstants.SUCCESS,
-                        "'skipConsent' is enabled for the OAuth client. Hence consent claims not generated.",
-                        "generate-consent-claims", configs);
+                params.put("skip consent", "true");
+                DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                            OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                        OAuthConstants.LogConstants.ActionIDs.GENERATE_CONSENT_CLAIMS);
+                diagnosticLogBuilder.inputParams(params)
+                        .resultStatus(DiagnosticLog.ResultStatus.SUCCESS)
+                        .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION)
+                        .resultMessage("'skipConsent' is enabled for the OAuth client. Hence consent claims not " +
+                                "generated.");
+                LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
             }
             return StringUtils.EMPTY;
         }
 
+        DiagnosticLog.DiagnosticLogBuilder errorDiagnosticLogBuilder = null;
+        if (LoggerUtils.isDiagnosticLogsEnabled()) {
+            errorDiagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                    OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                    OAuthConstants.LogConstants.ActionIDs.GENERATE_CONSENT_CLAIMS)
+                    .inputParams(params)
+                    .resultStatus(DiagnosticLog.ResultStatus.FAILED)
+                    .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION);
+        }
         try {
-            ConsentClaimsData claimsForApproval = getConsentRequiredClaims(user, serviceProvider, useExistingConsents,
-                    oauth2Params);
+            ConsentClaimsData claimsForApproval = getConsentRequiredClaims(user, serviceProvider, useExistingConsents);
             if (claimsForApproval != null) {
                 String requestClaimsQueryParam = null;
                 // Get the mandatory claims and append as query param.
@@ -2970,50 +3355,46 @@ public class OAuth2AuthzEndpoint {
                         removeConsentRequestedNullUserAttributes(claimsForApproval.getRequestedClaims(),
                                 user.getUserAttributes(), spTenantDomain));
                 List<ClaimMetaData> requestedOidcClaimsList =
-                        getRequestedOidcClaimsList(claimsForApproval, oauth2Params, spTenantDomain);
+                        getRequestedOidcClaimsList(claimsForApproval, oauth2Params, spTenantDomain, false);
                 if (CollectionUtils.isNotEmpty(requestedOidcClaimsList)) {
                     requestClaimsQueryParam = REQUESTED_CLAIMS + "=" +
                             buildConsentClaimString(requestedOidcClaimsList);
                 }
 
-                if (CollectionUtils.isNotEmpty(claimsForApproval.getMandatoryClaims())) {
+                List<ClaimMetaData> mandatoryOidcClaims =
+                        getRequestedOidcClaimsList(claimsForApproval, oauth2Params, spTenantDomain, true);
+                if (CollectionUtils.isNotEmpty(mandatoryOidcClaims)) {
                     mandatoryClaimsQueryParam = MANDATORY_CLAIMS + "=" +
-                            buildConsentClaimString(claimsForApproval.getMandatoryClaims());
-                }
-                if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                    Map<String, Object> configs = new HashMap<>();
-                    List<String> requestedClaims = new ArrayList<>();
-                    requestedOidcClaimsList.forEach(claim -> requestedClaims.add(claim.getClaimUri()));
-                    List<String> mandatoryClaims = new ArrayList<>();
-                    claimsForApproval.getMandatoryClaims().forEach(claim -> mandatoryClaims.add(claim.getClaimUri()));
-                    configs.put("skipConsent", "false");
-                    configs.put("requestedClaims", requestedClaims);
-                    configs.put("mandatoryClaims", mandatoryClaims);
-                    LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                            OAuthConstants.LogConstants.SUCCESS,
-                            "Consent claims generation successful. Consent claims query parameter: " +
-                                    additionalQueryParam, "generate-consent-claims", configs);
+                            buildConsentClaimString(mandatoryOidcClaims);
                 }
                 additionalQueryParam = buildQueryParamString(requestClaimsQueryParam, mandatoryClaimsQueryParam);
             }
         } catch (UnsupportedEncodingException | SSOConsentServiceException e) {
-            String msg = "Error while handling user consent for claim for user: " + user.toFullQualifiedUsername() +
-                    " for client_id: " + clientId + " of tenantDomain: " + spTenantDomain;
-            if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                        OAuthConstants.LogConstants.FAILED, "System error occurred.", "generate-consent-claims", null);
+            String username = LoggerUtils.isLogMaskingEnable ? LoggerUtils.getMaskedContent(
+                    user.toFullQualifiedUsername()) : user.toFullQualifiedUsername();
+            String msg = "Error while handling user consent for claim for user: " + username + " for client_id: " +
+                    clientId + " of tenantDomain: " + spTenantDomain;
+            if (errorDiagnosticLogBuilder != null) {
+                // errorDiagnosticLogBuilder is not null only if diagnostic logs are enabled.
+                errorDiagnosticLogBuilder.inputParam(LogConstants.InputKeys.ERROR_MESSAGE, e.getMessage())
+                        .resultMessage(msg);
+                LoggerUtils.triggerDiagnosticLogEvent(errorDiagnosticLogBuilder);
             }
             throw new ConsentHandlingFailedException(msg, e);
         } catch (ClaimMetadataException e) {
-            if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                        OAuthConstants.LogConstants.FAILED, "System error occurred.", "generate-consent-claims", null);
+            if (errorDiagnosticLogBuilder != null) {
+                // errorDiagnosticLogBuilder is not null only if diagnostic logs are enabled.
+                errorDiagnosticLogBuilder.inputParam(LogConstants.InputKeys.ERROR_MESSAGE, e.getMessage())
+                        .resultMessage("System error occurred.");
+                LoggerUtils.triggerDiagnosticLogEvent(errorDiagnosticLogBuilder);
             }
             throw new ConsentHandlingFailedException("Error while getting claim mappings for " + OIDC_DIALECT, e);
         } catch (RequestObjectException e) {
-            if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                        OAuthConstants.LogConstants.FAILED, "System error occurred.", "generate-consent-claims", null);
+            if (errorDiagnosticLogBuilder != null) {
+                // errorDiagnosticLogBuilder is not null only if diagnostic logs are enabled.
+                errorDiagnosticLogBuilder.inputParam(LogConstants.InputKeys.ERROR_MESSAGE, e.getMessage())
+                        .resultMessage("System error occurred.");
+                LoggerUtils.triggerDiagnosticLogEvent(errorDiagnosticLogBuilder);
             }
             throw new ConsentHandlingFailedException("Error while getting essential claims for the session data key " +
                     ": " + oauth2Params.getSessionDataKey(), e);
@@ -3067,17 +3448,19 @@ public class OAuth2AuthzEndpoint {
     }
 
     /**
-     * Filter requested claims based on OIDC claims and return the claims which includes in OIDC.
+     * Filter requested or mandatory claims based on OIDC claims and return the claims included in OIDC.
      *
      * @param claimsForApproval         Consent required claims.
      * @param oauth2Params              OAuth parameters.
      * @param spTenantDomain            Tenant domain.
-     * @return                          Requested OIDC claim list.
+     * @param isMandatory               If true, filter mandatory claims; otherwise, filter requested claims.
+     * @return                          Filtered OIDC claim list.
      * @throws RequestObjectException   If an error occurred while getting essential claims for the session data key.
      * @throws ClaimMetadataException   If an error occurred while getting claim mappings.
      */
     private List<ClaimMetaData> getRequestedOidcClaimsList(ConsentClaimsData claimsForApproval,
-                                                           OAuth2Parameters oauth2Params, String spTenantDomain)
+                                                           OAuth2Parameters oauth2Params, String spTenantDomain,
+                                                           boolean isMandatory)
             throws RequestObjectException, ClaimMetadataException {
 
         List<ClaimMetaData> requestedOidcClaimsList = new ArrayList<>();
@@ -3086,18 +3469,18 @@ public class OAuth2AuthzEndpoint {
 
         // Get the claims uri list of all the requested scopes. Eg:- country, email.
         List<String> claimListOfScopes =
-                openIDConnectClaimFilter.getClaimsFilteredByOIDCScopes(oauth2Params.getScopes(), spTenantDomain);
+                OpenIDConnectClaimFilterFactory.getOpenIdClaimFilterImpl().getClaimsFilteredByOIDCScopes(
+                        oauth2Params.getScopes(), spTenantDomain);
 
         List<String> essentialRequestedClaims = new ArrayList<>();
 
-        if (oauth2Params.isRequestObjectFlow()) {
+        if (!isMandatory && oauth2Params.isRequestObjectFlow()) {
             // Get the requested claims came through request object.
-            List<RequestedClaim> requestedClaimsOfIdToken = EndpointUtil.getRequestObjectService()
+            List<RequestedClaim> requestedClaimsOfIdToken = getRequestObjectService()
                     .getRequestedClaimsForSessionDataKey(oauth2Params.getSessionDataKey(), false);
 
-            List<RequestedClaim> requestedClaimsOfUserInfo = EndpointUtil.getRequestObjectService()
+            List<RequestedClaim> requestedClaimsOfUserInfo = getRequestObjectService()
                     .getRequestedClaimsForSessionDataKey(oauth2Params.getSessionDataKey(), true);
-
 
             // Get the list of id token's essential claims.
             for (RequestedClaim requestedClaim : requestedClaimsOfIdToken) {
@@ -3112,6 +3495,13 @@ public class OAuth2AuthzEndpoint {
                     essentialRequestedClaims.add(requestedClaim.getName());
                 }
             }
+        }
+
+        // Add user info's essential claims requested using claims parameter. Claims for id_token are skipped
+        // since claims parameter does not support id_token yet.
+        if (!isMandatory && oauth2Params.getEssentialClaims() != null) {
+            essentialRequestedClaims.addAll(OAuth2Util.getEssentialClaims(oauth2Params.getEssentialClaims(),
+                    USERINFO));
         }
 
         if (CollectionUtils.isNotEmpty(claimListOfScopes)) {
@@ -3142,10 +3532,13 @@ public class OAuth2AuthzEndpoint {
             }
         }
 
-        /* Check whether the local claim of oidc claims contains the requested claims or essential claims of
-         request object contains the requested claims, If it contains add it as requested claim.
-         */
-        for (ClaimMetaData claimMetaData : claimsForApproval.getRequestedClaims()) {
+        // Determine the source claims list based on whether it is mandatory or requested.
+        List<ClaimMetaData> approvalPendingClaims = isMandatory
+                ? claimsForApproval.getMandatoryClaims()
+                : claimsForApproval.getRequestedClaims();
+
+        // Filter claims based on OIDC mappings.
+        for (ClaimMetaData claimMetaData : approvalPendingClaims) {
             if (localClaimsOfOidcClaims.contains(claimMetaData.getClaimUri()) ||
                     localClaimsOfEssentialClaims.contains(claimMetaData.getClaimUri())) {
                 requestedOidcClaimsList.add(claimMetaData);
@@ -3157,18 +3550,12 @@ public class OAuth2AuthzEndpoint {
 
     private ConsentClaimsData getConsentRequiredClaims(AuthenticatedUser user,
                                                        ServiceProvider serviceProvider,
-                                                       boolean useExistingConsents, OAuth2Parameters oAuth2Parameters)
-            throws SSOConsentServiceException {
+                                                       boolean useExistingConsents) throws SSOConsentServiceException {
 
-        List<String> claimsListOfScopes =
-                openIDConnectClaimFilter.getClaimsFilteredByOIDCScopes(oAuth2Parameters.getScopes(),
-                        oAuth2Parameters.getTenantDomain());
         if (useExistingConsents) {
-            return getSSOConsentService().getConsentRequiredClaimsWithExistingConsents(serviceProvider, user,
-                    claimsListOfScopes);
+            return getSSOConsentService().getConsentRequiredClaimsWithExistingConsents(serviceProvider, user);
         } else {
-            return getSSOConsentService().getConsentRequiredClaimsWithoutExistingConsents(serviceProvider, user,
-                    claimsListOfScopes);
+            return getSSOConsentService().getConsentRequiredClaimsWithoutExistingConsents(serviceProvider, user);
         }
     }
 
@@ -3204,17 +3591,24 @@ public class OAuth2AuthzEndpoint {
             ConsentHandlingFailedException, OAuthProblemException {
 
         sessionState.setAddSessionState(true);
-        Map<String, Object> params = new HashMap<>();
-        params.put("clientId", oauth2Params.getClientId());
-        params.put("prompt", oauth2Params.getPrompt());
-        params.put("idTokenHint", oauth2Params.getIDTokenHint());
+        DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = null;
+        if (LoggerUtils.isDiagnosticLogsEnabled()) {
+            diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                    OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                    OAuthConstants.LogConstants.ActionIDs.VALIDATE_ID_TOKEN_HINT);
+            diagnosticLogBuilder.inputParam(LogConstants.InputKeys.CLIENT_ID, oauth2Params.getClientId())
+                    .inputParam(OAuthConstants.LogConstants.InputKeys.PROMPT, oauth2Params.getPrompt())
+                    .inputParam("id token hint", oauth2Params.getIDTokenHint())
+                    .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION)
+                    .resultStatus(DiagnosticLog.ResultStatus.FAILED);
+        }
         try {
             String idTokenHint = oauth2Params.getIDTokenHint();
             if (isIdTokenValidationFailed(idTokenHint)) {
-                if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                    LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                            OAuthConstants.LogConstants.FAILED, "ID token signature validation failed.",
-                            "validate-id-token-hint", null);
+                if (diagnosticLogBuilder != null) {
+                    // diagnosticLogBuilder is not null only if diagnostic logs are enabled.
+                    diagnosticLogBuilder.resultMessage("ID token signature validation failed.");
+                    LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
                 }
                 throw OAuthProblemException.error(OAuth2ErrorCodes.ACCESS_DENIED,
                         "Request with \'id_token_hint=" + idTokenHint +
@@ -3226,11 +3620,11 @@ public class OAuth2AuthzEndpoint {
                 return handlePreviouslyApprovedConsent(oAuthMessage, sessionState, oauth2Params, hasUserApproved,
                         authorizationResponseDTO);
             } else {
-                if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                    LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                            OAuthConstants.LogConstants.FAILED,
-                            "ID token 'sub' does not match with the authenticated user subject identifier.",
-                            "validate-id-token-hint", null);
+                if (diagnosticLogBuilder != null) {
+                    // diagnosticLogBuilder is not null only if diagnostic logs are enabled.
+                    diagnosticLogBuilder.resultMessage("ID token 'sub' does not match with the authenticated user " +
+                            "subject identifier.");
+                    LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
                 }
                 throw OAuthProblemException.error(OAuth2ErrorCodes.LOGIN_REQUIRED,
                         "Request with \'id_token_hint=" + idTokenHint +
@@ -3241,9 +3635,11 @@ public class OAuth2AuthzEndpoint {
             if (log.isDebugEnabled()) {
                 log.debug(msg, e);
             }
-            if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                        OAuthConstants.LogConstants.FAILED, "System error occurred.", "validate-id-token-hint", null);
+            if (diagnosticLogBuilder != null) {
+                // diagnosticLogBuilder is not null only if diagnostic logs are enabled.
+                diagnosticLogBuilder.inputParam(LogConstants.InputKeys.ERROR_MESSAGE, e.getMessage())
+                        .resultMessage("System error occurred.");
+                LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
             }
             throw OAuthProblemException.error(OAuth2ErrorCodes.ACCESS_DENIED, msg);
         }
@@ -3254,35 +3650,35 @@ public class OAuth2AuthzEndpoint {
                                                    AuthorizationResponseDTO authorizationResponseDTO)
             throws OAuthSystemException, ConsentHandlingFailedException, OAuthProblemException {
 
-        ServiceProvider serviceProvider = getServiceProvider(oauth2Params.getClientId());
         sessionState.setAddSessionState(true);
-        if (isConsentSkipped(serviceProvider)) {
-            if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                Map<String, Object> params = new HashMap<>();
-                params.put("clientId", oauth2Params.getClientId());
-                params.put("prompt", oauth2Params.getPrompt());
-
-                Map<String, Object> configs = new HashMap<>();
-                configs.put("skipConsent", "true");
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                        OAuthConstants.LogConstants.SUCCESS,
-                        "'prompt' is set to none, and consent is disabled for the OAuth client.",
-                        "validate-existing-consent", configs);
+        DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = null;
+        if (LoggerUtils.isDiagnosticLogsEnabled()) {
+            diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                    OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                    OAuthConstants.LogConstants.ActionIDs.VALIDATE_EXISTING_CONSENT);
+            diagnosticLogBuilder.inputParam(LogConstants.InputKeys.CLIENT_ID, oauth2Params.getClientId())
+                    .inputParam(OAuthConstants.LogConstants.InputKeys.PROMPT, oauth2Params.getPrompt())
+                    .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION);
+        }
+        if (isConsentSkipped(oauth2Params)) {
+            if (diagnosticLogBuilder != null) {
+                // diagnosticLogBuilder will be null only if diagnostic logs are disabled.
+                diagnosticLogBuilder.configParam("skip consent", "true")
+                        .resultStatus(DiagnosticLog.ResultStatus.SUCCESS)
+                        .resultMessage("'prompt' is set to none, and consent is disabled for the OAuth client.");
+                LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
             }
             return handleUserConsent(oAuthMessage, APPROVE, sessionState, oauth2Params, authorizationResponseDTO);
         } else if (hasUserApproved) {
             return handleApprovedAlwaysWithoutPromptingForNewConsent(oAuthMessage, sessionState, oauth2Params,
                     authorizationResponseDTO);
         } else {
-            if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                Map<String, Object> params = new HashMap<>();
-                params.put("clientId", oauth2Params.getClientId());
-                params.put("prompt", oauth2Params.getPrompt());
-                Map<String, Object> configs = new HashMap<>();
-                configs.put("skipConsent", "false");
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                        OAuthConstants.LogConstants.FAILED, "'prompt' is set to none, but required consent not found.",
-                        "validate-existing-consent", configs);
+            if (diagnosticLogBuilder != null) {
+                // diagnosticLogBuilder will be null only if diagnostic logs are disabled.
+                diagnosticLogBuilder.configParam("skip consent", "false")
+                        .resultStatus(DiagnosticLog.ResultStatus.FAILED)
+                        .resultMessage("'prompt' is set to none, but required consent not found.");
+                LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
             }
             throw OAuthProblemException.error(OAuth2ErrorCodes.CONSENT_REQUIRED,
                     "Required consent not found");
@@ -3298,31 +3694,33 @@ public class OAuth2AuthzEndpoint {
         AuthenticatedUser authenticatedUser = getLoggedInUser(oAuthMessage);
         String preConsent = handlePreConsentIncludingExistingConsents(oauth2Params, authenticatedUser);
 
+        DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = null;
+        if (LoggerUtils.isDiagnosticLogsEnabled()) {
+            diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                    OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                    OAuthConstants.LogConstants.ActionIDs.VALIDATE_EXISTING_CONSENT);
+            diagnosticLogBuilder.inputParam(LogConstants.InputKeys.CLIENT_ID, oauth2Params.getClientId())
+                    .inputParam(OAuthConstants.LogConstants.InputKeys.PROMPT, oauth2Params.getPrompt())
+                    .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION);
+        }
         if (isConsentFromUserRequired(preConsent)) {
-            if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                Map<String, Object> params = new HashMap<>();
-                params.put("clientId", oauth2Params.getClientId());
-                params.put("prompt", oauth2Params.getPrompt());
-
-                Map<String, Object> configs = new HashMap<>();
-                configs.put("consentRequiredClaims", preConsent);
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                        OAuthConstants.LogConstants.FAILED,
-                        "'prompt' is set to none, and existing user consent is incomplete for the OAuth client.",
-                        "validate-existing-consent", configs);
+            if (diagnosticLogBuilder != null) {
+                // diagnosticLogBuilder will be null only if diagnostic logs are disabled.
+                diagnosticLogBuilder.configParam("consent required claims", preConsent)
+                        .resultMessage("'prompt' is set to none, and existing user consent is incomplete for " +
+                                "the OAuth client.")
+                        .resultStatus(DiagnosticLog.ResultStatus.FAILED);
+                LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
             }
             throw OAuthProblemException.error(OAuth2ErrorCodes.CONSENT_REQUIRED,
                     "Consent approved always without prompting for new consent");
         } else {
-            if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                Map<String, Object> params = new HashMap<>();
-                params.put("clientId", oauth2Params.getClientId());
-                params.put("prompt", oauth2Params.getPrompt());
-
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                        OAuthConstants.LogConstants.SUCCESS,
-                        "'prompt' is set to none, and existing user consent found for the OAuth client.",
-                        "validate-existing-consent", null);
+            if (diagnosticLogBuilder != null) {
+                // diagnosticLogBuilder will be null only if diagnostic logs are disabled.
+                diagnosticLogBuilder.resultMessage("'prompt' is set to none, and existing user consent found for " +
+                        "the OAuth client.")
+                        .resultStatus(DiagnosticLog.ResultStatus.SUCCESS);
+                LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
             }
             return handleUserConsent(oAuthMessage, APPROVE, sessionState, oauth2Params, authorizationResponseDTO);
         }
@@ -3357,10 +3755,15 @@ public class OAuth2AuthzEndpoint {
             throws OAuthSystemException {
 
         try {
-            return EndpointUtil.isUserAlreadyConsentedForOAuthScopes(user, oauth2Params);
+            return EndpointUtil.isUserAlreadyConsentedForOAuthScopes(user, oauth2Params) &&
+                    OAuth2ServiceComponentHolder.getInstance().getAuthorizationDetailsService()
+                            .isUserAlreadyConsentedForAuthorizationDetails(user, oauth2Params);
         } catch (IdentityOAuth2ScopeException | IdentityOAuthAdminException e) {
             throw new OAuthSystemException("Error occurred while checking user has already approved the consent " +
                     "required OAuth scopes.", e);
+        } catch (IdentityOAuth2Exception e) {
+            throw new OAuthSystemException("Error occurred while checking user has already approved the consent " +
+                    "required authorization details.", e);
         }
     }
 
@@ -3430,7 +3833,7 @@ public class OAuth2AuthzEndpoint {
     }
 
     private OAuth2AuthorizeReqDTO buildAuthRequest(OAuth2Parameters oauth2Params, SessionDataCacheEntry
-            sessionDataCacheEntry, HttpRequestHeaderHandler httpRequestHeaderHandler) {
+            sessionDataCacheEntry, HttpRequestHeaderHandler httpRequestHeaderHandler, HttpServletRequest request) {
 
         OAuth2AuthorizeReqDTO authzReqDTO = new OAuth2AuthorizeReqDTO();
         authzReqDTO.setCallbackUrl(oauth2Params.getRedirectURI());
@@ -3450,6 +3853,11 @@ public class OAuth2AuthzEndpoint {
         authzReqDTO.setRequestObjectFlow(oauth2Params.isRequestObjectFlow());
         authzReqDTO.setIdpSessionIdentifier(sessionDataCacheEntry.getSessionContextIdentifier());
         authzReqDTO.setLoggedInTenantDomain(oauth2Params.getLoginTenantDomain());
+        authzReqDTO.setState(oauth2Params.getState());
+        authzReqDTO.setHttpServletRequestWrapper(new HttpServletRequestWrapper(request));
+        authzReqDTO.setRequestedSubjectId(oauth2Params.getRequestedSubjectId());
+        authzReqDTO.setMappedRemoteClaims(sessionDataCacheEntry.getMappedRemoteClaims());
+        authzReqDTO.setAuthorizationDetails(oauth2Params.getAuthorizationDetails());
 
         if (sessionDataCacheEntry.getParamMap() != null && sessionDataCacheEntry.getParamMap().get(OAuthConstants
                 .AMR) != null) {
@@ -3489,7 +3897,7 @@ public class OAuth2AuthzEndpoint {
         if (authResultCacheEntry != null) {
             authResult = authResultCacheEntry.getResult();
         } else {
-            log.error("Cannot find AuthenticationResult from the cache");
+            log.warn("Cannot find AuthenticationResult from the cache");
         }
         return authResult;
     }
@@ -3585,29 +3993,44 @@ public class OAuth2AuthzEndpoint {
      * @throws InvalidRequestParentException
      * @Param type OAuthMessage
      */
-    private Response handleAuthFlowThroughFramework(OAuthMessage oAuthMessage, String type) throws URISyntaxException,
-            InvalidRequestParentException {
+    private Response handleAuthFlowThroughFramework(OAuthMessage oAuthMessage, String type, String redirectUrl)
+            throws URISyntaxException, InvalidRequestParentException {
 
         if (LoggerUtils.isDiagnosticLogsEnabled()) {
-            Map<String, Object> params = new HashMap<>();
-            params.put("clientId", oAuthMessage.getClientId());
-            LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                    OAuthConstants.LogConstants.SUCCESS,
-                    "Forward authorization request to framework for user authentication.", "hand-over-to-framework",
-                    null);
+            DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                    OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                    OAuthConstants.LogConstants.ActionIDs.HAND_OVER_TO_FRAMEWORK)
+                    .resultMessage("Forward authorization request to framework for user authentication.")
+                    .resultStatus(DiagnosticLog.ResultStatus.SUCCESS)
+                    .inputParam(LogConstants.InputKeys.CLIENT_ID, oAuthMessage.getClientId())
+                    .logDetailLevel(DiagnosticLog.LogDetailLevel.INTERNAL_SYSTEM);
+            LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
         }
         try {
             String sessionDataKey =
                     (String) oAuthMessage.getRequest().getAttribute(FrameworkConstants.SESSION_DATA_KEY);
 
-            CommonAuthenticationHandler commonAuthenticationHandler = new CommonAuthenticationHandler();
 
             CommonAuthRequestWrapper requestWrapper = new CommonAuthRequestWrapper(oAuthMessage.getRequest());
             requestWrapper.setParameter(FrameworkConstants.SESSION_DATA_KEY, sessionDataKey);
             requestWrapper.setParameter(FrameworkConstants.RequestParams.TYPE, type);
 
             CommonAuthResponseWrapper responseWrapper = new CommonAuthResponseWrapper(oAuthMessage.getResponse());
-            commonAuthenticationHandler.doGet(requestWrapper, responseWrapper);
+
+            if (isApiBasedAuthenticationFlow(oAuthMessage)) {
+                // Marking the initial request as additional validation will be done from the auth service.
+                requestWrapper.setAttribute(AuthServiceConstants.REQ_ATTR_IS_INITIAL_API_BASED_AUTH_REQUEST, true);
+                requestWrapper.setAttribute(AuthServiceConstants.REQ_ATTR_RELYING_PARTY, oAuthMessage.getClientId());
+
+                AuthenticationService authenticationService = new AuthenticationService();
+                AuthServiceResponse authServiceResponse = authenticationService.
+                        handleAuthentication(new AuthServiceRequest(requestWrapper, responseWrapper));
+                // This is done to provide a way to propagate the auth service response to needed places.
+                attachAuthServiceResponseToRequest(requestWrapper, authServiceResponse);
+            } else {
+                CommonAuthenticationHandler commonAuthenticationHandler = new CommonAuthenticationHandler();
+                commonAuthenticationHandler.doGet(requestWrapper, responseWrapper);
+            }
 
             Object attribute = oAuthMessage.getRequest().getAttribute(FrameworkConstants.RequestParams.FLOW_STATUS);
             if (attribute != null) {
@@ -3620,6 +4043,16 @@ public class OAuth2AuthzEndpoint {
                         return Response.status(HttpServletResponse.SC_OK).entity(responseWrapper.getContent()).build();
                     }
                 } else {
+                    try {
+                        String serviceProviderId =
+                                getServiceProvider(oAuthMessage.getRequest().getParameter(CLIENT_ID))
+                                .getApplicationResourceId();
+                        requestWrapper.setParameter(SERVICE_PROVIDER_ID, serviceProviderId);
+                    } catch (Exception e) {
+                        // The value is set to be used for branding purposes. Therefore, if an error occurs,
+                        // the process should continue without breaking.
+                        log.error("Error occurred while getting service provider id.");
+                    }
                     return authorize(requestWrapper, oAuthMessage.getResponse());
                 }
             } else {
@@ -3627,13 +4060,18 @@ public class OAuth2AuthzEndpoint {
                         .setAttribute(FrameworkConstants.RequestParams.FLOW_STATUS, AuthenticatorFlowStatus.UNKNOWN);
                 return authorize(requestWrapper, oAuthMessage.getResponse());
             }
+        } catch (AuthServiceException e) {
+            return handleApiBasedAuthErrorResponse(oAuthMessage.getRequest(), e);
         } catch (ServletException | IOException | URLBuilderException e) {
             log.error("Error occurred while sending request to authentication framework.");
             if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                Map<String, Object> params = new HashMap<>();
-                params.put("clientId", oAuthMessage.getClientId());
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                        OAuthConstants.LogConstants.FAILED, "Server error occurred.", "hand-over-to-framework", null);
+                LoggerUtils.triggerDiagnosticLogEvent(new DiagnosticLog.DiagnosticLogBuilder(
+                        OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                        OAuthConstants.LogConstants.ActionIDs.HAND_OVER_TO_FRAMEWORK)
+                        .inputParam(LogConstants.InputKeys.CLIENT_ID, oAuthMessage.getClientId())
+                        .resultMessage("Server error occurred.")
+                        .logDetailLevel(DiagnosticLog.LogDetailLevel.INTERNAL_SYSTEM)
+                        .resultStatus(DiagnosticLog.ResultStatus.FAILED));
             }
             return Response.status(HttpServletResponse.SC_INTERNAL_SERVER_ERROR).build();
         }
@@ -3692,7 +4130,7 @@ public class OAuth2AuthzEndpoint {
                                         oAuth2Parameters.getLoginTenantDomain());
                     }
                     // Storing the oidc session id.
-                    storeSidClaim(authorizationResponseDTO, oAuthMessage, sessionStateObj);
+                    storeSidClaim(authorizationResponseDTO, oAuthMessage, previousSessionState);
                 } else {
                     if (log.isDebugEnabled()) {
                         log.debug(String.format(
@@ -3760,7 +4198,69 @@ public class OAuth2AuthzEndpoint {
             for (AuthHistory authHistory : sessionContext.getSessionAuthHistory().getHistory()) {
                 authMethods.add(authHistory.toTranslatableString());
             }
+            authMethods = getAMRValues(authMethods, sessionContext.getAuthenticatedIdPs());
             resultFromLogin.getParamMap().put(OAuthConstants.AMR, authMethods.toArray(new String[authMethods.size()]));
+        }
+    }
+
+    /**
+     * Replaces the authenticator names with the AMR values sent by the IDP.
+     *
+     * @param authMethods       The list of authentication methods set by resident IDP.
+     * @param authenticatedIdPs The authenticated IDPs.
+     */
+    private List<String> getAMRValues(List<String> authMethods, Map<String, AuthenticatedIdPData> authenticatedIdPs) {
+
+        boolean readAMRValueFromIdp = Boolean.parseBoolean(IdentityUtil.getProperty(
+                OAuthConstants.READ_AMR_VALUE_FROM_IDP));
+        if (readAMRValueFromIdp) {
+            List<String> resultantAuthMethods = new ArrayList<>();
+            Object[] idpKeySet = authenticatedIdPs.keySet().toArray();
+            for (String authMethod : authMethods) {
+                boolean amrFieldExists = false;
+                for (Object idp : idpKeySet) {
+                    String idpKey = (String) idp;
+                    for (AuthenticatorConfig authenticator : authenticatedIdPs.get(idpKey).getAuthenticators()) {
+                        if (authenticator.getName().equals(authMethod)) {
+                            if (authenticatedIdPs.get(idpKey) != null && authenticatedIdPs.get(idpKey).getUser() != null
+                                    && authenticatedIdPs.get(idpKey).getUser().getUserAttributes() != null) {
+                                for (Map.Entry<ClaimMapping, String> entry : authenticatedIdPs.get(idpKey).getUser()
+                                        .getUserAttributes().entrySet()) {
+                                    if (entry.getKey().getLocalClaim().getClaimUri().equals(OAuthConstants.AMR)) {
+                                        amrFieldExists = true;
+                                        addToAuthMethods(entry.getValue(), resultantAuthMethods);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if (amrFieldExists) {
+                            break;
+                        }
+                    }
+                }
+                if (!amrFieldExists) {
+                    resultantAuthMethods.add(authMethod);
+                }
+            }
+            return resultantAuthMethods;
+        }
+        return authMethods;
+    }
+
+    /**
+     * Adds the authentication methods to the list.
+     *
+     * @param amrValue             Comma separated authentication method value or values.
+     * @param resultantAuthMethods The resultant list of authentication methods.
+     */
+    private void addToAuthMethods(String amrValue, List<String> resultantAuthMethods) {
+
+        if (amrValue.contains(",")) {
+            String[] amrValues = amrValue.split(",");
+            resultantAuthMethods.addAll(Arrays.asList(amrValues));
+        } else {
+            resultantAuthMethods.add(amrValue);
         }
     }
 
@@ -4032,8 +4532,420 @@ public class OAuth2AuthzEndpoint {
         }
     }
 
+    private Response forwardToOauthResponseJSP(OAuthMessage oAuthMessage, String params, String redirectURI,
+                                               AuthorizationResponseDTO authorizationResponseDTO,
+                                               AuthenticatedUser authenticatedUser) {
+        try {
+            HttpServletRequest request = oAuthMessage.getRequest();
+            request.setAttribute(USER_TENANT_DOMAIN, authenticatedUser.getTenantDomain());
+            request.setAttribute(TENANT_DOMAIN, authorizationResponseDTO.getSigningTenantDomain());
+            ServiceProvider serviceProvider = getServiceProvider(authorizationResponseDTO.getClientId());
+            if (serviceProvider != null && serviceProvider.getApplicationName() != null) {
+                request.setAttribute(SERVICE_PROVIDER, serviceProvider.getApplicationName());
+            }
+            forwardToOauthResponseJSP(oAuthMessage, params, redirectURI);
+            return Response.ok().build();
+        } catch (OAuthSystemException exception) {
+            log.error("Error occurred while setting service provider in the request to oauth_response.jsp page.",
+                    exception);
+            return Response.status(HttpServletResponse.SC_INTERNAL_SERVER_ERROR)
+                       .entity("Internal Server Error: " + exception.getMessage())
+                       .build();
+        }
+    }
+
     private boolean isPromptSelectAccount(OAuth2Parameters oauth2Params) {
 
         return OAuthConstants.Prompt.SELECT_ACCOUNT.equals(oauth2Params.getPrompt());
+    }
+
+    private void cacheUserAttributesByDeviceCode(SessionDataCacheEntry sessionDataCacheEntry)
+            throws OAuthSystemException {
+
+        String userCode = null;
+        Optional<String> deviceCodeOptional = Optional.empty();
+        String[] userCodeArray = sessionDataCacheEntry.getParamMap().get(Constants.USER_CODE);
+        if (ArrayUtils.isNotEmpty(userCodeArray)) {
+            userCode = userCodeArray[0];
+        }
+        if (StringUtils.isNotBlank(userCode)) {
+            deviceCodeOptional = getDeviceCodeByUserCode(userCode);
+        }
+        if (deviceCodeOptional.isPresent()) {
+            addUserAttributesToCache(sessionDataCacheEntry, deviceCodeOptional.get());
+        }
+    }
+
+    private Optional<String> getDeviceCodeByUserCode(String userCode) throws OAuthSystemException {
+
+        try {
+            return DeviceServiceFactory.getDeviceAuthService().getDeviceCode(userCode);
+        } catch (IdentityOAuth2Exception e) {
+            throw new OAuthSystemException("Error occurred while retrieving device code for user code: " + userCode, e);
+        }
+    }
+
+    private void addUserAttributesToCache(SessionDataCacheEntry sessionDataCacheEntry, String deviceCode) {
+
+        DeviceAuthorizationGrantCacheKey cacheKey = new DeviceAuthorizationGrantCacheKey(deviceCode);
+        DeviceAuthorizationGrantCacheEntry cacheEntry =
+                new DeviceAuthorizationGrantCacheEntry(sessionDataCacheEntry.getLoggedInUser().getUserAttributes());
+        if (sessionDataCacheEntry.getMappedRemoteClaims() != null) {
+            cacheEntry.setMappedRemoteClaims(sessionDataCacheEntry
+                    .getMappedRemoteClaims());
+        }
+        DeviceAuthorizationGrantCache.getInstance().addToCache(cacheKey, cacheEntry);
+    }
+
+    private boolean isFapiConformant(String clientId) throws InvalidRequestException {
+
+        try {
+            return OAuth2Util.isFapiConformantApp(clientId);
+        } catch (InvalidOAuthClientException e) {
+            throw new InvalidRequestException(OAuth2ErrorCodes.INVALID_CLIENT, "Could not find an existing app for " +
+                    "clientId: " + clientId, e);
+        } catch (IdentityOAuth2Exception e) {
+            throw new InvalidRequestException(OAuth2ErrorCodes.SERVER_ERROR, "Error while obtaining the service " +
+                    "provider for clientId: " + clientId, e);
+        }
+    }
+
+    private boolean isApiBasedAuthenticationFlow(OAuthMessage oAuthMessage) {
+
+        OAuth2Parameters oAuth2Parameters = getOauth2Params(oAuthMessage);
+        if (oAuth2Parameters != null) {
+            return isApiBasedAuthenticationFlow(getOauth2Params(oAuthMessage));
+        }
+
+        return OAuth2Util.isApiBasedAuthenticationFlow(oAuthMessage.getRequest());
+    }
+
+    private boolean isApiBasedAuthenticationFlow(OAuth2Parameters oAuth2Parameters) {
+
+        if (oAuth2Parameters == null) {
+            if (log.isDebugEnabled()) {
+                log.debug("OAuth2Parameters is null. Returning false for isApiBasedAuthenticationFlow check.");
+            }
+            return false;
+        }
+        return OAuthConstants.ResponseModes.DIRECT.equals(oAuth2Parameters.getResponseMode());
+    }
+
+    private void attachAuthServiceResponseToRequest(HttpServletRequest request,
+                                                    AuthServiceResponse authServiceResponse) {
+
+        request.setAttribute(AUTH_SERVICE_RESPONSE, authServiceResponse);
+    }
+
+    private Response handleApiBasedAuthenticationResponse(OAuthMessage oAuthMessage, Response oauthResponse) {
+
+        // API based auth response transformation has already been handled no need for further handling.
+        if (Boolean.TRUE.equals(oAuthMessage.getRequest().getAttribute(IS_API_BASED_AUTH_HANDLED))) {
+            return oauthResponse;
+        }
+        try {
+            Object attribute = oAuthMessage.getRequest().getAttribute(FrameworkConstants.RequestParams.FLOW_STATUS);
+            if (attribute == AuthenticatorFlowStatus.INCOMPLETE) {
+                AuthServiceResponse authServiceResponse = (AuthServiceResponse) oAuthMessage.getRequest()
+                        .getAttribute(AUTH_SERVICE_RESPONSE);
+
+                if (authServiceResponse.getFlowStatus() == AuthServiceConstants.FlowStatus.FAIL_COMPLETED) {
+                    if (authServiceResponse.getErrorInfo().isPresent()) {
+                        throw new AuthServiceClientException(authServiceResponse.getErrorInfo().get().getErrorCode(),
+                                authServiceResponse.getErrorInfo().get().getErrorDescription());
+                    } else {
+                        throw new AuthServiceClientException(
+                                AuthServiceConstants.ErrorMessage.ERROR_INVALID_AUTH_REQUEST.message());
+                    }
+                }
+
+                AuthResponse authResponse = API_AUTHN_HANDLER.handleResponse(authServiceResponse);
+                ObjectMapper objectMapper = new ObjectMapper();
+                objectMapper.setSerializationInclusion(JsonInclude.Include.NON_EMPTY);
+                String jsonString = null;
+                try {
+                    jsonString = objectMapper.writeValueAsString(authResponse);
+                } catch (JsonProcessingException e) {
+                    throw new AuthServiceException(AuthServiceConstants.ErrorMessage.ERROR_UNABLE_TO_PROCEED.code(),
+                            "Error while building JSON response.", e);
+                }
+                oAuthMessage.getRequest().setAttribute(IS_API_BASED_AUTH_HANDLED, true);
+                return Response.ok().entity(jsonString).build();
+            } else {
+                List<Object> locationHeader = oauthResponse.getMetadata().get("Location");
+                if (CollectionUtils.isNotEmpty(locationHeader)) {
+                    String location = locationHeader.get(0).toString();
+                    if (StringUtils.isNotBlank(location)) {
+                        Map<String, String> queryParams;
+                        try {
+                            queryParams = getQueryParamsFromUrl(location);
+                        } catch (UnsupportedEncodingException | URISyntaxException e) {
+                            throw new AuthServiceException(
+                                    AuthServiceConstants.ErrorMessage.ERROR_UNABLE_TO_PROCEED.code(),
+                                    "Error while extracting query params from provided url.", e);
+                        }
+                        if (isRedirectToClient(location)) {
+                            SuccessCompleteAuthResponse successCompleteAuthResponse =
+                                    new SuccessCompleteAuthResponse(queryParams);
+                            String jsonPayload = new Gson().toJson(successCompleteAuthResponse);
+                            oAuthMessage.getRequest().setAttribute(IS_API_BASED_AUTH_HANDLED, true);
+                            return Response.status(HttpServletResponse.SC_OK).entity(jsonPayload).build();
+                        } else {
+                            /* At this point if the location header doesn't indicate a redirection to the client
+                             we can assume it is an error scenario which redirects to the error page. Therefore,
+                             we need to handle the response as an API based error response.*/
+                            String errorMsg = getErrorMessageForApiBasedClientError(queryParams);
+                            if (StringUtils.isBlank(errorMsg)) {
+                                errorMsg = AuthServiceConstants.ErrorMessage.ERROR_INVALID_AUTH_REQUEST.description();
+                            }
+                            throw new AuthServiceClientException(
+                                    AuthServiceConstants.ErrorMessage.ERROR_INVALID_AUTH_REQUEST.code(), errorMsg);
+
+                        }
+                    }
+                }
+            }
+        } catch (AuthServiceException e) {
+            return handleApiBasedAuthErrorResponse(oAuthMessage.getRequest(), e);
+        }
+
+        // Returning the original response as it hasn't been handled as an API based authentication response.
+        return oauthResponse;
+    }
+
+    private Response handleApiBasedAuthErrorResponse(HttpServletRequest request, AuthServiceException e) {
+
+        if (e instanceof AuthServiceClientException) {
+            request.setAttribute(IS_API_BASED_AUTH_HANDLED, true);
+            return ApiAuthnUtils.buildResponseForClientError((AuthServiceClientException) e, log);
+        } else {
+            request.setAttribute(IS_API_BASED_AUTH_HANDLED, true);
+            return ApiAuthnUtils.buildResponseForServerError(e, log);
+        }
+    }
+
+    private Map<String, String> getQueryParamsFromUrl(String url) throws UnsupportedEncodingException,
+            URISyntaxException {
+
+        Map<String, String> queryParams = new HashMap<>();
+
+        if (StringUtils.isBlank(url)) {
+            return queryParams;
+        }
+
+        URI uri = new URI(url);
+        String query = uri.getQuery();
+        if (StringUtils.isNotBlank(query)) {
+            String[] pairs = query.split(FrameworkUtils.QUERY_SEPARATOR);
+            for (String pair : pairs) {
+                int idx = pair.indexOf(FrameworkUtils.EQUAL);
+                queryParams.put(URLDecoder.decode(pair.substring(0, idx), StandardCharsets.UTF_8.toString()),
+                        URLDecoder.decode(pair.substring(idx + 1), StandardCharsets.UTF_8.toString()));
+            }
+        }
+        return queryParams;
+    }
+
+    private void checkPARMandatory(OAuth2Parameters params, OAuthMessage oAuthMessage)
+            throws InvalidRequestException {
+
+        OAuthAppDO oAuthAppDO;
+        try {
+            oAuthAppDO = OAuth2Util.getAppInformationByClientId(params.getClientId(), params.getTenantDomain());
+        } catch (IdentityOAuth2Exception | InvalidOAuthClientException e) {
+            throw new InvalidRequestException(e.getMessage(), e.getErrorCode());
+        }
+        if (oAuthAppDO.isRequirePushedAuthorizationRequests()) {
+            if (!Boolean.TRUE.equals(oAuthMessage.getRequest()
+                    .getAttribute(OAuthConstants.IS_PUSH_AUTHORIZATION_REQUEST))) {
+                throw new InvalidRequestException("PAR request is mandatory for the application.",
+                        OAuth2ErrorCodes.INVALID_REQUEST,
+                        OAuth2ErrorCodes.OAuth2SubErrorCodes.INVALID_AUTHORIZATION_REQUEST);
+            }
+        }
+    }
+
+    private boolean isRedirectToClient(String url) {
+
+        if (StringUtils.isBlank(url)) {
+            return false;
+        }
+
+        if (url.startsWith(OAuth2Util.OAuthURL.getOAuth2ErrorPageUrl())) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private String getErrorMessageForApiBasedClientError(Map<String, String> params) {
+
+        String oauthErrorCode = params.get(OAuthConstants.OAUTH_ERROR_CODE);
+        String oauthErrorMsg = params.get(OAuthConstants.OAUTH_ERROR_MESSAGE);
+
+        if (StringUtils.isBlank(oauthErrorCode)) {
+            return oauthErrorMsg != null ? oauthErrorMsg : StringUtils.EMPTY;
+        } else if (StringUtils.isBlank(oauthErrorMsg)) {
+            return oauthErrorCode;
+        } else {
+            return oauthErrorCode + " " + AuthServiceConstants.INTERNAL_ERROR_MSG_SEPARATOR + " " + oauthErrorMsg;
+        }
+    }
+
+    private OAuthClientAuthnContext getClientAuthnContext(HttpServletRequest request) {
+
+        OAuthClientAuthnContext oAuthClientAuthnContext;
+        Object oauthClientAuthnContextObj = request.getAttribute(OAuthConstants.CLIENT_AUTHN_CONTEXT);
+        if (oauthClientAuthnContextObj instanceof OAuthClientAuthnContext) {
+            oAuthClientAuthnContext = (OAuthClientAuthnContext) oauthClientAuthnContextObj;
+        } else {
+            oAuthClientAuthnContext = new OAuthClientAuthnContext();
+            oAuthClientAuthnContext.setAuthenticated(false);
+            oAuthClientAuthnContext.setErrorCode(OAuthError.TokenResponse.INVALID_REQUEST);
+        }
+        return oAuthClientAuthnContext;
+    }
+
+    private ClientAttestationContext getClientAttestationContext(HttpServletRequest request) {
+
+        ClientAttestationContext clientAttestationContext;
+        Object clientAttestationContextObj = request.getAttribute(CLIENT_ATTESTATION_CONTEXT);
+        if (clientAttestationContextObj instanceof ClientAttestationContext) {
+            clientAttestationContext = (ClientAttestationContext) clientAttestationContextObj;
+        } else {
+            clientAttestationContext = new ClientAttestationContext(false);
+            clientAttestationContext.setAttested(false);
+        }
+        return clientAttestationContext;
+    }
+
+    /**
+     * Handle the authentication failure response for API based authentication.
+     *
+     * @param oAuthClientAuthnContext OAuth client authentication context.
+     * @return Auth failure response.
+     */
+    private Response handleAuthFailureResponse(OAuthClientAuthnContext oAuthClientAuthnContext) {
+
+        if (OAuth2ErrorCodes.SERVER_ERROR.equals(oAuthClientAuthnContext.getErrorCode())) {
+            String msg = "Server encountered an error while authorizing the request.";
+            return ApiAuthnUtils.buildResponseForServerError(new AuthServiceException(msg), log);
+        }
+        return ApiAuthnUtils.buildResponseForAuthorizationFailure(oAuthClientAuthnContext.getErrorMessage(), log);
+    }
+
+    private Response handleAttestationFailureResponse(ClientAttestationContext clientAttestationContext) {
+
+        return ApiAuthnUtils.buildResponseForAuthorizationFailure(
+                clientAttestationContext.getValidationFailureMessage(), log);
+    }
+
+    private Response handleUnsupportedGrantForApiBasedAuth() {
+
+        return ApiAuthnUtils.buildResponseForClientError(
+                new AuthServiceClientException(AuthServiceConstants.ErrorMessage.ERROR_INVALID_AUTH_REQUEST.code(),
+                        "App native authentication is only supported with code response type."), log);
+    }
+
+    private String addServiceProviderIdToRedirectURI(String redirectURI, String serviceProviderId) {
+
+        if (StringUtils.isNotBlank(redirectURI) && StringUtils.isNotBlank(serviceProviderId)) {
+            try {
+                URI uri = new URI(redirectURI);
+                String query = uri.getRawQuery();
+                if (StringUtils.isNotBlank(query)) {
+                    if (!query.contains(SERVICE_PROVIDER_ID + "=")) {
+                        redirectURI = redirectURI + "&" + SERVICE_PROVIDER_ID + "=" + serviceProviderId;
+                    }
+                } else {
+                    redirectURI = redirectURI + "?" + SERVICE_PROVIDER_ID + "=" + serviceProviderId;
+                }
+            } catch (URISyntaxException e) {
+                log.debug("Error occurred while adding service provider id to redirect URI.", e);
+            }
+        }
+        return redirectURI;
+    }
+
+    /**
+     * Validates the authorization details in the provided OAuth message before user consent.
+     *
+     * <p>This method checks if the request is a rich authorization request. If it is, it
+     * retrieves and validates the authorization details, updating the parameters and context
+     * accordingly. If any validation errors occur, it logs the issue and throws an appropriate
+     * exception.</p>
+     *
+     * @param oAuthMessage          The {@link OAuthMessage} containing the authorization request details.
+     * @param oAuth2Parameters      The {@link OAuth2Parameters} object holding the parameters of the OAuth request.
+     * @throws AuthorizationDetailsProcessingException If there is an error processing the authorization details.
+     * @throws OAuthSystemException                    If there is an error during the validation process.
+     */
+    private void validateAuthorizationDetailsBeforeConsent(final OAuthMessage oAuthMessage,
+                                                           final OAuth2Parameters oAuth2Parameters)
+            throws AuthorizationDetailsProcessingException, OAuthSystemException {
+
+        if (!AuthorizationDetailsUtils.isRichAuthorizationRequest(oAuth2Parameters)) {
+            log.debug("Authorization request is not a rich authorization request. Skipping validation.");
+            return;
+        }
+
+        try {
+            if (LoggerUtils.isDiagnosticLogsEnabled()) {
+                DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                        OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                        OAuthConstants.LogConstants.ActionIDs.VALIDATE_AUTHORIZATION_DETAILS_BEFORE_CONSENT);
+                diagnosticLogBuilder.inputParam(LogConstants.InputKeys.CLIENT_ID, oAuth2Parameters.getClientId())
+                        .inputParam(LogConstants.InputKeys.APPLICATION_NAME, oAuth2Parameters.getApplicationName())
+                        .inputParam("authorization details to be validated",
+                                oAuth2Parameters.getAuthorizationDetails().toSet())
+                        .resultStatus(DiagnosticLog.ResultStatus.SUCCESS)
+                        .resultMessage("authorization details validation started")
+                        .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION);
+                LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
+            }
+
+            final OAuthAuthzReqMessageContext oAuthAuthzReqMessageContext =
+                    oAuthMessage.getSessionDataCacheEntry().getAuthzReqMsgCtx();
+
+            // Validate the authorization details
+            final AuthorizationDetails validatedAuthorizationDetails = OAuth2ServiceComponentHolder.getInstance()
+                    .getAuthorizationDetailsValidator()
+                    .getValidatedAuthorizationDetails(oAuthAuthzReqMessageContext);
+
+            // Update the authorization message context with validated authorization details
+            oAuthAuthzReqMessageContext.setRequestedAuthorizationDetails(AuthorizationDetailsUtils
+                    .assignUniqueIDsToAuthorizationDetails(validatedAuthorizationDetails));
+            oAuthMessage.getSessionDataCacheEntry().setAuthzReqMsgCtx(oAuthAuthzReqMessageContext);
+
+            // update oAuth2Parameters with validated authorization details
+            oAuth2Parameters.setAuthorizationDetails(oAuthAuthzReqMessageContext.getRequestedAuthorizationDetails());
+
+            if (LoggerUtils.isDiagnosticLogsEnabled()) {
+                DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                        OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                        OAuthConstants.LogConstants.ActionIDs.VALIDATE_AUTHORIZATION_DETAILS_BEFORE_CONSENT);
+                diagnosticLogBuilder.inputParam(LogConstants.InputKeys.CLIENT_ID, oAuth2Parameters.getClientId())
+                        .inputParam(LogConstants.InputKeys.APPLICATION_NAME, oAuth2Parameters.getApplicationName())
+                        .inputParam("authorization details after validation",
+                                oAuth2Parameters.getAuthorizationDetails().toSet())
+                        .resultStatus(DiagnosticLog.ResultStatus.SUCCESS)
+                        .resultMessage("authorization details validation completed")
+                        .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION);
+                LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
+            }
+        } catch (IdentityOAuth2ServerException e) {
+            log.error("Error occurred while validating authorization details. Caused by, ", e);
+            throw new OAuthSystemException("Error occurred while validating requested authorization details", e);
+        }
+    }
+
+    private void setAuthorizationDetails(final OAuth2AuthorizeRespDTO oAuth2AuthorizeRespDTO,
+                                         final OAuthASResponse.OAuthAuthorizationResponseBuilder builder,
+                                         final AuthorizationResponseDTO authorizationResponseDTO) {
+
+        final AuthorizationDetails authorizationDetails = oAuth2AuthorizeRespDTO.getAuthorizationDetails();
+        builder.setParam(AuthorizationDetailsConstants.AUTHORIZATION_DETAILS,
+                AuthorizationDetailsUtils.getUrlEncodedAuthorizationDetails(authorizationDetails));
+        authorizationResponseDTO.getSuccessResponseDTO().setAuthorizationDetails(authorizationDetails);
     }
 }

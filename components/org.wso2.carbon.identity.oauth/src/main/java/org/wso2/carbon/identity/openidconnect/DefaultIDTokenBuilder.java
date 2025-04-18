@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
+ * Copyright (c) 2017-2025, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
  *
  * WSO2 Inc. licenses this file to you under the Apache License,
  * Version 2.0 (the "License"); you may not use this file except
@@ -30,6 +30,7 @@ import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.wso2.carbon.base.MultitenantConstants;
+import org.wso2.carbon.context.PrivilegedCarbonContext;
 import org.wso2.carbon.identity.application.authentication.framework.AuthenticationMethodNameTranslator;
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
 import org.wso2.carbon.identity.oauth.cache.AuthorizationGrantCache;
@@ -67,6 +68,7 @@ import static org.wso2.carbon.identity.oauth.common.OAuthConstants.OIDCClaims.AU
 import static org.wso2.carbon.identity.oauth.common.OAuthConstants.OIDCClaims.AZP;
 import static org.wso2.carbon.identity.oauth.common.OAuthConstants.OIDCClaims.IDP_SESSION_KEY;
 import static org.wso2.carbon.identity.oauth.common.OAuthConstants.OIDCClaims.NONCE;
+import static org.wso2.carbon.identity.oauth2.token.handlers.grant.RefreshGrantHandler.SESSION_IDENTIFIER;
 
 /**
  * Default IDToken generator for the OpenID Connect Implementation.
@@ -110,16 +112,25 @@ public class DefaultIDTokenBuilder implements org.wso2.carbon.identity.openidcon
                                OAuth2AccessTokenRespDTO tokenRespDTO) throws IdentityOAuth2Exception {
         String clientId = tokenReqMsgCtxt.getOauth2AccessTokenReqDTO().getClientId();
         String spTenantDomain = getSpTenantDomain(tokenReqMsgCtxt);
-        String idTokenIssuer = OAuth2Util.getIdTokenIssuer(spTenantDomain);
+        String requestURL = tokenReqMsgCtxt.getOauth2AccessTokenReqDTO().getHttpServletRequestWrapper()
+                .getRequestURL().toString();
+        String idTokenIssuer = OAuth2Util.getIdTokenIssuer(spTenantDomain, clientId,
+                OAuth2Util.isMtlsRequest(requestURL));
         String accessToken = tokenRespDTO.getAccessToken();
+        JWSAlgorithm idTokenSignatureAlgorithm = signatureAlgorithm;
 
         // Initialize OAuthAppDO using the client ID.
         OAuthAppDO oAuthAppDO;
         try {
-            oAuthAppDO = OAuth2Util.getAppInformationByClientId(clientId);
+            oAuthAppDO = OAuth2Util.getAppInformationByClientId(clientId, spTenantDomain);
         } catch (InvalidOAuthClientException e) {
             String error = "Error occurred while getting app information for client_id: " + clientId;
             throw new IdentityOAuth2Exception(error, e);
+        }
+        // Retrieve application id token signature algorithm
+        if (StringUtils.isNotEmpty(oAuthAppDO.getIdTokenSignatureAlgorithm())) {
+            idTokenSignatureAlgorithm = OAuth2Util.mapSignatureAlgorithmForJWSAlgorithm(
+                    oAuthAppDO.getIdTokenSignatureAlgorithm());
         }
 
         long idTokenValidityInMillis = getIDTokenExpiryInMillis(oAuthAppDO);
@@ -127,6 +138,8 @@ public class DefaultIDTokenBuilder implements org.wso2.carbon.identity.openidcon
 
         AuthenticatedUser authorizedUser = tokenReqMsgCtxt.getAuthorizedUser();
         String subjectClaim = getSubjectClaim(tokenReqMsgCtxt, tokenRespDTO, clientId, spTenantDomain, authorizedUser);
+        // Get subject identifier according to the configured subject type.
+        subjectClaim = OIDCClaimUtil.getSubjectClaim(subjectClaim, oAuthAppDO);
 
         String nonceValue = null;
         String idpSessionKey = null;
@@ -162,6 +175,9 @@ public class DefaultIDTokenBuilder implements org.wso2.carbon.identity.openidcon
             if (!OAuthConstants.GrantTypes.PASSWORD.equalsIgnoreCase(
                     tokenReqMsgCtxt.getOauth2AccessTokenReqDTO().getGrantType())) {
                 idpSessionKey = getIdpSessionKey(accessToken);
+                if (idpSessionKey == null && tokenReqMsgCtxt.getProperty(SESSION_IDENTIFIER) != null) {
+                    idpSessionKey = tokenReqMsgCtxt.getProperty(SESSION_IDENTIFIER).toString();
+                }
             }
         }
 
@@ -222,7 +238,8 @@ public class DefaultIDTokenBuilder implements org.wso2.carbon.identity.openidcon
         }
 
 
-        return getIDToken(clientId, spTenantDomain, jwtClaimsSet, oAuthAppDO, getSigningTenantDomain(tokenReqMsgCtxt));
+        return getIDToken(clientId, spTenantDomain, jwtClaimsSet, oAuthAppDO, getSigningTenantDomain(tokenReqMsgCtxt),
+                idTokenSignatureAlgorithm);
     }
 
     @Override
@@ -232,17 +249,10 @@ public class DefaultIDTokenBuilder implements org.wso2.carbon.identity.openidcon
         String accessToken = tokenRespDTO.getAccessToken();
         String clientId = authzReqMessageContext.getAuthorizationReqDTO().getConsumerKey();
         String spTenantDomain = getSpTenantDomain(authzReqMessageContext);
-        String issuer = OAuth2Util.getIdTokenIssuer(spTenantDomain);
-
-        // Get subject from Authenticated Subject Identifier
-        AuthenticatedUser authorizedUser = authzReqMessageContext.getAuthorizationReqDTO().getUser();
-        String subject =
-                getSubjectClaim(authzReqMessageContext, tokenRespDTO, clientId, spTenantDomain, authorizedUser);
-
-        String nonceValue = authzReqMessageContext.getAuthorizationReqDTO().getNonce();
-        String acrValue = authzReqMessageContext.getAuthorizationReqDTO().getSelectedAcr();
-        List<String> amrValues = Collections.emptyList(); //TODO:
-        String idpSessionKey = getIdpSessionKey(authzReqMessageContext);
+        Object isMtls = authzReqMessageContext.getProperty(OAuthConstants.IS_MTLS_REQUEST);
+        boolean isMtlsRequest = isMtls != null && Boolean.parseBoolean(isMtls.toString());
+        String issuer = OAuth2Util.getIdTokenIssuer(spTenantDomain, isMtlsRequest);
+        JWSAlgorithm idTokenSignatureAlgorithm = signatureAlgorithm;
 
         // Initialize OAuthAppDO using the client ID.
         OAuthAppDO oAuthAppDO;
@@ -252,6 +262,23 @@ public class DefaultIDTokenBuilder implements org.wso2.carbon.identity.openidcon
             String error = "Error occurred while getting app information for client_id: " + clientId;
             throw new IdentityOAuth2Exception(error, e);
         }
+        // Retrieve application id token signature algorithm
+        if (StringUtils.isNotEmpty(oAuthAppDO.getIdTokenSignatureAlgorithm())) {
+            idTokenSignatureAlgorithm = OAuth2Util.mapSignatureAlgorithmForJWSAlgorithm(
+                    oAuthAppDO.getIdTokenSignatureAlgorithm());
+        }
+
+        // Get subject from Authenticated Subject Identifier
+        AuthenticatedUser authorizedUser = authzReqMessageContext.getAuthorizationReqDTO().getUser();
+        String subject =
+                getSubjectClaim(authzReqMessageContext, tokenRespDTO, clientId, spTenantDomain, authorizedUser);
+        // Get subject identifier according to the configured subject type.
+        subject = OIDCClaimUtil.getSubjectClaim(subject, oAuthAppDO);
+
+        String nonceValue = authzReqMessageContext.getAuthorizationReqDTO().getNonce();
+        String acrValue = authzReqMessageContext.getAuthorizationReqDTO().getSelectedAcr();
+        List<String> amrValues = Collections.emptyList(); //TODO:
+        String idpSessionKey = getIdpSessionKey(authzReqMessageContext);
 
         String[] amrValueArray =
                 (String[]) (authzReqMessageContext.getAuthorizationReqDTO().getProperty(OAuthConstants.AMR));
@@ -296,7 +323,9 @@ public class DefaultIDTokenBuilder implements org.wso2.carbon.identity.openidcon
         setUserRealm(authorizedUser, jwtClaimsSetBuilder);
         setAdditionalClaims(authzReqMessageContext, tokenRespDTO, jwtClaimsSetBuilder);
 
-        authzReqMessageContext.addProperty(OAuthConstants.ACCESS_TOKEN, accessToken);
+        if (StringUtils.isNotBlank(accessToken)) {
+            authzReqMessageContext.addProperty(OAuthConstants.ACCESS_TOKEN, accessToken);
+        }
         authzReqMessageContext
                 .addProperty(MultitenantConstants.TENANT_DOMAIN, getSpTenantDomain(authzReqMessageContext));
         jwtClaimsSetBuilder.subject(subject);
@@ -307,11 +336,12 @@ public class DefaultIDTokenBuilder implements org.wso2.carbon.identity.openidcon
         }
 
         return getIDToken(clientId, spTenantDomain, jwtClaimsSet, oAuthAppDO,
-                getSigningTenantDomain(authzReqMessageContext));
+                getSigningTenantDomain(authzReqMessageContext), idTokenSignatureAlgorithm);
     }
 
     private String getIDToken(String clientId, String spTenantDomain, JWTClaimsSet jwtClaimsSet, OAuthAppDO oAuthAppDO,
-                              String signingTenantDomain) throws IdentityOAuth2Exception {
+                              String signingTenantDomain, JWSAlgorithm signatureAlgorithm)
+            throws IdentityOAuth2Exception {
 
         if (oAuthAppDO.isIdTokenEncryptionEnabled()) {
             checkIfPublicCertConfiguredForEncryption(clientId, spTenantDomain);
@@ -392,7 +422,16 @@ public class DefaultIDTokenBuilder implements org.wso2.carbon.identity.openidcon
 
     private String getSigningTenantDomain(OAuthTokenReqMessageContext tokReqMsgCtx) {
         boolean isJWTSignedWithSPKey = OAuthServerConfiguration.getInstance().isJWTSignedWithSPKey();
-        if (isJWTSignedWithSPKey) {
+        String applicationResidentOrgId = PrivilegedCarbonContext.getThreadLocalCarbonContext()
+                .getApplicationResidentOrganizationId();
+        /*
+         If applicationResidentOrgId is not empty, then the request comes for an application which is
+         registered directly in the organization of the applicationResidentOrgId. In this case, the tenant domain
+         that needs to be signing the token should be the root tenant of the organization in applicationResidentOrgId.
+        */
+        if (StringUtils.isNotEmpty(applicationResidentOrgId)) {
+            return PrivilegedCarbonContext.getThreadLocalCarbonContext().getTenantDomain();
+        } else if (isJWTSignedWithSPKey) {
             return (String) tokReqMsgCtx.getProperty(MultitenantConstants.TENANT_DOMAIN);
         } else {
             return tokReqMsgCtx.getAuthorizedUser().getTenantDomain();

@@ -18,6 +18,7 @@
 
 package org.wso2.carbon.identity.oauth2.dto;
 
+import org.wso2.carbon.identity.oauth.rar.model.AuthorizationDetails;
 import org.wso2.carbon.identity.oauth2.bean.OAuthClientAuthnContext;
 import org.wso2.carbon.identity.oauth2.model.AccessTokenExtendedAttributes;
 import org.wso2.carbon.identity.oauth2.model.HttpRequestHeader;
@@ -29,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 
 import javax.servlet.http.HttpServletRequestWrapper;
+import javax.servlet.http.HttpServletResponseWrapper;
 
 /**
  * OAuth 2 access token request DTO.
@@ -52,6 +54,7 @@ public class OAuth2AccessTokenReqDTO {
     private RequestParameter[] requestParameters;
     private HttpRequestHeader[] httpRequestHeaders;
     private HttpServletRequestWrapper httpServletRequestWrapper;
+    private HttpServletResponseWrapper httpServletResponseWrapper;
     private List<String> authenticationMethodReferences = new ArrayList<>();
     private OAuthClientAuthnContext oAuthClientAuthnContext;
 
@@ -59,6 +62,8 @@ public class OAuth2AccessTokenReqDTO {
     private Map<String, String> parameters;
 
     private AccessTokenExtendedAttributes accessTokenExtendedAttributes;
+
+    private AuthorizationDetails authorizationDetails;
 
     public String getClientId() {
         return clientId;
@@ -241,5 +246,35 @@ public class OAuth2AccessTokenReqDTO {
             AccessTokenExtendedAttributes accessTokenExtendedAttributes) {
 
         this.accessTokenExtendedAttributes = accessTokenExtendedAttributes;
+    }
+
+    public HttpServletResponseWrapper getHttpServletResponseWrapper() {
+        return httpServletResponseWrapper;
+    }
+
+    public void setHttpServletResponseWrapper(HttpServletResponseWrapper httpServletResponseWrapper) {
+        this.httpServletResponseWrapper = httpServletResponseWrapper;
+    }
+
+    /**
+     * Retrieves the authorization details requested in the token request.
+     *
+     * @return the {@link AuthorizationDetails} instance representing the rich authorization requests.
+     * If no authorization details are requested by the client, the method will return {@code null}.
+     */
+    public AuthorizationDetails getAuthorizationDetails() {
+
+        return this.authorizationDetails;
+    }
+
+    /**
+     * Sets the authorization details.
+     * This method updates the authorization details with the provided {@link AuthorizationDetails} instance.
+     *
+     * @param authorizationDetails the {@link AuthorizationDetails} to set.
+     */
+    public void setAuthorizationDetails(final AuthorizationDetails authorizationDetails) {
+
+        this.authorizationDetails = authorizationDetails;
     }
 }

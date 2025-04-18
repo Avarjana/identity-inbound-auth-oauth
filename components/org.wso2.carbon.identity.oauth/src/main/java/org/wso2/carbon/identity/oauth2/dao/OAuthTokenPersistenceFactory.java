@@ -20,6 +20,10 @@
 
 package org.wso2.carbon.identity.oauth2.dao;
 
+import org.wso2.carbon.identity.oauth.internal.OAuthComponentServiceHolder;
+import org.wso2.carbon.identity.oauth.rar.dao.AuthorizationDetailsDAO;
+import org.wso2.carbon.identity.oauth.rar.dao.AuthorizationDetailsDAOImpl;
+import org.wso2.carbon.identity.oauth.rar.model.AuthorizationDetails;
 import org.wso2.carbon.identity.openidconnect.dao.CacheBackedScopeClaimMappingDAOImpl;
 import org.wso2.carbon.identity.openidconnect.dao.RequestObjectDAO;
 import org.wso2.carbon.identity.openidconnect.dao.RequestObjectDAOImpl;
@@ -39,6 +43,7 @@ public class OAuthTokenPersistenceFactory {
     private ScopeClaimMappingDAO scopeClaimMappingDAO;
     private TokenBindingMgtDAO tokenBindingMgtDAO;
     private OAuthUserConsentedScopesDAO oauthUserConsentedScopesDAO;
+    private final AuthorizationDetailsDAO authorizationDetailsDAO;
 
     public OAuthTokenPersistenceFactory() {
 
@@ -50,6 +55,7 @@ public class OAuthTokenPersistenceFactory {
         this.scopeClaimMappingDAO = new CacheBackedScopeClaimMappingDAOImpl();
         this.tokenBindingMgtDAO = new TokenBindingMgtDAOImpl();
         this.oauthUserConsentedScopesDAO = new CacheBackedOAuthUserConsentedScopesDAOImpl();
+        this.authorizationDetailsDAO = new AuthorizationDetailsDAOImpl();
     }
 
     public static OAuthTokenPersistenceFactory getInstance() {
@@ -64,7 +70,12 @@ public class OAuthTokenPersistenceFactory {
 
     public AccessTokenDAO getAccessTokenDAO() {
 
-        return tokenDAO;
+        AccessTokenDAO accessTokenDAO = OAuthComponentServiceHolder.getInstance().getAccessTokenDAOService();
+        if (accessTokenDAO == null) {
+            return tokenDAO;
+        }
+
+        return accessTokenDAO;
     }
 
     public OAuthScopeDAO getOAuthScopeDAO() {
@@ -74,7 +85,12 @@ public class OAuthTokenPersistenceFactory {
 
     public TokenManagementDAO getTokenManagementDAO() {
 
-        return managementDAO;
+        TokenManagementDAO tokenManagementDAO = OAuthComponentServiceHolder.getInstance()
+                .getTokenManagementDAOService();
+        if (tokenManagementDAO == null) {
+            return managementDAO;
+        }
+        return tokenManagementDAO;
     }
 
     public RequestObjectDAO getRequestObjectDAO() {
@@ -95,5 +111,18 @@ public class OAuthTokenPersistenceFactory {
     public OAuthUserConsentedScopesDAO getOAuthUserConsentedScopesDAO() {
 
         return oauthUserConsentedScopesDAO;
+    }
+
+    /**
+     * Retrieves the DAO for authorization details.
+     * <p>
+     * This method returns an {@link AuthorizationDetailsDAO} singleton instance that provides access to the
+     * {@link AuthorizationDetails} data. This DAO is used to interact
+     * with the underlying data store to fetch and manipulate authorization information.
+     *</p>
+     * @return the {@link AuthorizationDetailsDAO} instance that provides access to authorization details data.
+     */
+    public AuthorizationDetailsDAO getAuthorizationDetailsDAO() {
+        return this.authorizationDetailsDAO;
     }
 }

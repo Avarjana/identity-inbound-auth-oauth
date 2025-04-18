@@ -23,11 +23,17 @@ import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.wso2.carbon.identity.application.authentication.framework.exception.UserIdNotFoundException;
+import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
+import org.wso2.carbon.identity.application.authentication.framework.util.FrameworkConstants;
+import org.wso2.carbon.identity.application.common.model.ClaimMapping;
 import org.wso2.carbon.identity.base.IdentityConstants;
 import org.wso2.carbon.identity.base.IdentityException;
+import org.wso2.carbon.identity.central.log.mgt.utils.LogConstants;
 import org.wso2.carbon.identity.central.log.mgt.utils.LoggerUtils;
 import org.wso2.carbon.identity.core.util.IdentityUtil;
 import org.wso2.carbon.identity.oauth.OAuthUtil;
+import org.wso2.carbon.identity.oauth.cache.AuthorizationGrantCache;
+import org.wso2.carbon.identity.oauth.cache.AuthorizationGrantCacheKey;
 import org.wso2.carbon.identity.oauth.cache.OAuthCache;
 import org.wso2.carbon.identity.oauth.cache.OAuthCacheKey;
 import org.wso2.carbon.identity.oauth.common.OAuthConstants;
@@ -36,6 +42,7 @@ import org.wso2.carbon.identity.oauth.config.OAuthServerConfiguration;
 import org.wso2.carbon.identity.oauth.dao.OAuthAppDO;
 import org.wso2.carbon.identity.oauth.event.OAuthEventInterceptor;
 import org.wso2.carbon.identity.oauth.internal.OAuthComponentServiceHolder;
+import org.wso2.carbon.identity.oauth.rar.model.AuthorizationDetails;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
 import org.wso2.carbon.identity.oauth2.dao.AuthorizationCodeValidationResult;
 import org.wso2.carbon.identity.oauth2.dao.OAuthTokenPersistenceFactory;
@@ -43,8 +50,10 @@ import org.wso2.carbon.identity.oauth2.dto.OAuth2AccessTokenReqDTO;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2AccessTokenRespDTO;
 import org.wso2.carbon.identity.oauth2.model.AccessTokenDO;
 import org.wso2.carbon.identity.oauth2.model.AuthzCodeDO;
+import org.wso2.carbon.identity.oauth2.rar.util.AuthorizationDetailsUtils;
 import org.wso2.carbon.identity.oauth2.token.OAuthTokenReqMessageContext;
 import org.wso2.carbon.identity.oauth2.util.OAuth2Util;
+import org.wso2.carbon.utils.DiagnosticLog;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -97,19 +106,37 @@ public class AuthorizationCodeGrantHandler extends AbstractAuthorizationGrantHan
             throws IdentityOAuth2Exception {
         OAuth2AccessTokenRespDTO tokenResp = super.issue(tokReqMsgCtx);
         String authzCode = retrieveAuthzCode(tokReqMsgCtx);
-
         deactivateAuthzCode(tokReqMsgCtx, tokenResp.getTokenId(), authzCode);
         clearAuthzCodeCache(tokReqMsgCtx, authzCode);
         return tokenResp;
     }
 
+    /**
+     * Build and return a string to be used as a lock for synchronous token issuance for refresh token grant type.
+     *
+     * @param tokReqMsgCtx        OAuthTokenReqMessageContext
+     * @return A string to be used as a lock for synchronous token issuance for refresh token grant type.
+     */
+    public String buildSyncLockString(OAuthTokenReqMessageContext tokReqMsgCtx) {
+
+        String clientId = tokReqMsgCtx.getOauth2AccessTokenReqDTO().getClientId();
+        String authzCode = tokReqMsgCtx.getOauth2AccessTokenReqDTO().getAuthorizationCode();
+        String tokenBindingReference = OAuth2Util.getTokenBindingReferenceString(tokReqMsgCtx);
+        String scope = OAuth2Util.buildScopeString(tokReqMsgCtx.getScope());
+
+        return AUTHZ_CODE + ":" + clientId + ":" + authzCode + ":" + tokenBindingReference + ":" + scope;
+    }
+
     private void setPropertiesForTokenGeneration(OAuthTokenReqMessageContext tokReqMsgCtx,
-                                                 OAuth2AccessTokenReqDTO tokenReq, AuthzCodeDO authzCodeBean) {
+                                                 OAuth2AccessTokenReqDTO tokenReq, AuthzCodeDO authzCodeBean)
+            throws IdentityOAuth2Exception {
+
         tokReqMsgCtx.setAuthorizedUser(authzCodeBean.getAuthorizedUser());
         tokReqMsgCtx.setScope(authzCodeBean.getScope());
         // keep the pre processed authz code as a OAuthTokenReqMessageContext property to avoid
         // calculating it again when issuing the access token.
         tokReqMsgCtx.addProperty(AUTHZ_CODE, tokenReq.getAuthorizationCode());
+        this.setRARPropertiesForTokenGeneration(tokReqMsgCtx);
     }
 
     private boolean validateCallbackUrlFromRequest(String callbackUrlFromRequest,
@@ -125,13 +152,15 @@ public class AuthorizationCodeGrantHandler extends AbstractAuthorizationGrantHan
                         " is not matching with persisted callback url " + callbackUrlFromPersistedAuthzCode);
             }
             if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                Map<String, Object> params = new HashMap<>();
-                params.put("callbackUrlInRequest", callbackUrlFromRequest);
-                Map<String, Object> configs = new HashMap<>();
-                configs.put("applicationCallbackUrl", callbackUrlFromPersistedAuthzCode);
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                        OAuthConstants.LogConstants.FAILED, "Received callback URL does not match with the persisted.",
-                        "validate-input-parameters", configs);
+                LoggerUtils.triggerDiagnosticLogEvent(new DiagnosticLog.DiagnosticLogBuilder(
+                        OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                        OAuthConstants.LogConstants.ActionIDs.VALIDATE_INPUT_PARAMS)
+                        .inputParam(OAuthConstants.LogConstants.InputKeys.CALLBACK_URI, callbackUrlFromRequest)
+                        .configParam(OAuthConstants.LogConstants.ConfigKeys.REGISTERED_CALLBACK_URI,
+                                callbackUrlFromPersistedAuthzCode)
+                        .resultMessage("Received callback URL does not match with the persisted.")
+                        .resultStatus(DiagnosticLog.ResultStatus.FAILED)
+                        .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION));
             }
             throw new IdentityOAuth2Exception("Callback url mismatch");
         }
@@ -280,6 +309,9 @@ public class AuthorizationCodeGrantHandler extends AbstractAuthorizationGrantHan
                 OAuthUtil.clearOAuthCache(tokenReqDTO.getClientId(), validationResult.getAuthzCodeDO().
                         getAuthorizedUser(), scope);
             }
+            // The user resident organization should be resolved for the organization SSO users.
+            resolveUserResidentOrgForOrganizationSSOUsers(validationResult.getAuthzCodeDO().getAuthorizedUser(),
+                    tokenReqDTO.getAuthorizationCode());
             return validationResult.getAuthzCodeDO();
         } else {
             // This means an invalid authorization code was sent for validation. We return null since higher
@@ -295,7 +327,7 @@ public class AuthorizationCodeGrantHandler extends AbstractAuthorizationGrantHan
             userId = authzCodeDO.getAuthorizedUser().getUserId();
         } catch (UserIdNotFoundException e) {
             throw new IdentityOAuth2Exception("User id not found for user: "
-                    + authzCodeDO.getAuthorizedUser().getLoggableUserId(), e);
+                    + authzCodeDO.getAuthorizedUser().getLoggableMaskedUserId(), e);
         }
         String accessToken = OAuthTokenPersistenceFactory.getInstance().getAccessTokenDAO()
                 .getAccessTokenByTokenId(tokenId);
@@ -375,10 +407,13 @@ public class AuthorizationCodeGrantHandler extends AbstractAuthorizationGrantHan
     private boolean validateAuthzCodeFromRequest(AuthzCodeDO authzCodeBean, String clientId, String authzCode)
             throws IdentityOAuth2Exception {
 
-        Map<String, Object> params = new HashMap<>();
-        params.put("clientId", clientId);
-        params.put("authorizationCode", authzCode);
-
+        DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
+                OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                OAuthConstants.LogConstants.ActionIDs.VALIDATE_AUTHORIZATION_CODE);
+        if (LoggerUtils.isDiagnosticLogsEnabled()) {
+            diagnosticLogBuilder.inputParam(LogConstants.InputKeys.CLIENT_ID, clientId)
+                    .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION);
+        }
         if (authzCodeBean == null) {
             // If no auth code details available, cannot proceed with Authorization code grant
             if (log.isDebugEnabled()) {
@@ -386,10 +421,12 @@ public class AuthorizationCodeGrantHandler extends AbstractAuthorizationGrantHan
                         "and couldn't find persisted data for authorization code: " + authzCode);
             }
             if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                        OAuthConstants.LogConstants.FAILED,
-                        "Invalid authorization code received. Couldn't find persisted data for authorization code.",
-                        "validate-authz-code", null);
+                diagnosticLogBuilder.resultMessage("Invalid authorization code received. Couldn't find persisted data" +
+                                " for authorization code.")
+                        .inputParam(OAuthConstants.LogConstants.InputKeys.AUTHORIZATION_CODE, authzCode)
+                        .resultStatus(DiagnosticLog.ResultStatus.FAILED)
+                        .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION);
+                LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
             }
             throw new IdentityOAuth2Exception("Invalid authorization code received from token request");
         }
@@ -397,9 +434,10 @@ public class AuthorizationCodeGrantHandler extends AbstractAuthorizationGrantHan
         if (isInactiveAuthzCode(authzCodeBean)) {
             clearTokenCache(authzCodeBean, clientId);
             if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                        OAuthConstants.LogConstants.FAILED, "Inactive authorization code received.",
-                        "validate-authz-code", null);
+                diagnosticLogBuilder.resultMessage("Inactive authorization code received.")
+                        .inputParam(OAuthConstants.LogConstants.InputKeys.AUTHORIZATION_CODE, authzCode)
+                        .resultStatus(DiagnosticLog.ResultStatus.FAILED);
+                LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
             }
             throw new IdentityOAuth2Exception("Inactive authorization code received from token request");
         }
@@ -407,23 +445,25 @@ public class AuthorizationCodeGrantHandler extends AbstractAuthorizationGrantHan
         if (isAuthzCodeExpired(authzCodeBean) || isAuthzCodeRevoked(authzCodeBean)) {
             if (isAuthzCodeExpired(authzCodeBean)) {
                 if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                    LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                            OAuthConstants.LogConstants.FAILED, "Expired authorization code received.",
-                            "validate-authz-code", null);
+                    diagnosticLogBuilder.resultMessage("Expired authorization code received.")
+                            .inputParam("authorization code", authzCode)
+                            .resultStatus(DiagnosticLog.ResultStatus.FAILED);
+                    LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
                 }
             } else if (isAuthzCodeRevoked(authzCodeBean)) {
                 if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                    LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                            OAuthConstants.LogConstants.FAILED, "Revoked authorization code received.",
-                            "validate-authz-code", null);
+                    diagnosticLogBuilder.resultMessage("Revoked authorization code received.")
+                            .inputParam(OAuthConstants.LogConstants.InputKeys.AUTHORIZATION_CODE, authzCode)
+                            .resultStatus(DiagnosticLog.ResultStatus.FAILED);
+                    LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
                 }
             }
             throw new IdentityOAuth2Exception("Expired or Revoked authorization code received from token request");
         }
         if (LoggerUtils.isDiagnosticLogsEnabled()) {
-            LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                    OAuthConstants.LogConstants.SUCCESS, "Authorization code validation is successful.",
-                    "validate-authz-code", null);
+            diagnosticLogBuilder.resultMessage("Authorization code validation is successful.")
+                    .resultStatus(DiagnosticLog.ResultStatus.SUCCESS);
+            LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
         }
         return true;
     }
@@ -515,7 +555,7 @@ public class AuthorizationCodeGrantHandler extends AbstractAuthorizationGrantHan
     private void markAsExpired(AuthzCodeDO authzCodeBean) throws IdentityOAuth2Exception {
 
         OAuthTokenPersistenceFactory.getInstance().getAuthorizationCodeDAO()
-                .updateAuthorizationCodeState(authzCodeBean.getAuthorizationCode(),
+                .updateAuthorizationCodeState(authzCodeBean.getAuthorizationCode(), authzCodeBean.getAuthzCodeId(),
                         OAuthConstants.AuthorizationCodeState.EXPIRED);
         if (log.isDebugEnabled()) {
             log.debug("Changed state of authorization code : " + authzCodeBean.getAuthorizationCode() + " to expired");
@@ -559,8 +599,10 @@ public class AuthorizationCodeGrantHandler extends AbstractAuthorizationGrantHan
     }
 
     private void revokeAuthorizationCode(AuthzCodeDO authzCodeBean) throws IdentityOAuth2Exception {
+
         OAuthTokenPersistenceFactory.getInstance().getAuthorizationCodeDAO().updateAuthorizationCodeState(
-                authzCodeBean.getAuthorizationCode(), OAuthConstants.AuthorizationCodeState.REVOKED);
+                authzCodeBean.getAuthorizationCode(), authzCodeBean.getAuthzCodeId(),
+                OAuthConstants.AuthorizationCodeState.REVOKED);
         if (log.isDebugEnabled()) {
             log.debug("Changed state of authorization code : " + authzCodeBean.getAuthorizationCode() + " to revoked");
         }
@@ -611,5 +653,59 @@ public class AuthorizationCodeGrantHandler extends AbstractAuthorizationGrantHan
                         " was removed from the cache.");
             }
         }
+    }
+
+    private void resolveUserResidentOrgForOrganizationSSOUsers(AuthenticatedUser authenticatedUser, String authzCode) {
+
+        if (authenticatedUser.isFederatedUser() && FrameworkConstants.ORGANIZATION_LOGIN_IDP_NAME
+                .equals(authenticatedUser.getFederatedIdPName())) {
+            String userResideOrganization = resolveUserResidentOrganization(AuthorizationGrantCache.getInstance()
+                    .getValueFromCacheByCode(new AuthorizationGrantCacheKey(authzCode)).getUserAttributes());
+            authenticatedUser.setAccessingOrganization(userResideOrganization);
+            authenticatedUser.setUserResidentOrganization(userResideOrganization);
+        }
+    }
+
+    private String resolveUserResidentOrganization(Map<ClaimMapping, String> userAttributes) {
+
+        for (Map.Entry<ClaimMapping, String> attributes : userAttributes.entrySet()) {
+            if (attributes.getKey() != null && attributes.getKey().getLocalClaim() != null &&
+                    FrameworkConstants.USER_ORGANIZATION_CLAIM
+                            .equals(attributes.getKey().getLocalClaim().getClaimUri())) {
+                return attributes.getValue();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Configures RAR properties for token generation in the OAuth 2.0 flow.
+     * <p>
+     * It checks if authorization details were included in the authorization code request and whether the
+     * user has consented to these specific authorization details. Depending on user consent, it selects
+     * the appropriate authorization details to be included in the token response.
+     * </p>
+     *
+     * @param oAuthTokenReqMessageContext Context of the OAuth token request message.
+     * @throws IdentityOAuth2Exception If an error occurs while retrieving authorization details.
+     */
+    private void setRARPropertiesForTokenGeneration(final OAuthTokenReqMessageContext oAuthTokenReqMessageContext)
+            throws IdentityOAuth2Exception {
+
+        final int tenantId =
+                OAuth2Util.getTenantId(oAuthTokenReqMessageContext.getOauth2AccessTokenReqDTO().getTenantDomain());
+
+        if (log.isDebugEnabled()) {
+            log.debug("Retrieving user consented authorization details for user: "
+                    + oAuthTokenReqMessageContext.getAuthorizedUser().getLoggableMaskedUserId());
+        }
+
+        final AuthorizationDetails authorizationCodeAuthorizationDetails = super.authorizationDetailsService
+                .getAuthorizationCodeAuthorizationDetails(
+                        oAuthTokenReqMessageContext.getOauth2AccessTokenReqDTO().getAuthorizationCode(),
+                        tenantId);
+
+        oAuthTokenReqMessageContext.setAuthorizationDetails(AuthorizationDetailsUtils
+                .getTrimmedAuthorizationDetails(authorizationCodeAuthorizationDetails));
     }
 }

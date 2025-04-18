@@ -1,7 +1,7 @@
 /*
- * Copyright (c) 2013, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
+ * Copyright (c) 2013-2025, WSO2 LLC. (http://www.wso2.com).
  *
- * WSO2 Inc. licenses this file to you under the Apache License,
+ * WSO2 LLC. licenses this file to you under the Apache License,
  * Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License.
  * You may obtain a copy of the License at
@@ -11,7 +11,7 @@
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
+ * KIND, either express or implied.  See the License for the
  * specific language governing permissions and limitations
  * under the License.
  */
@@ -26,11 +26,19 @@ import org.apache.commons.logging.LogFactory;
 import org.apache.oltu.oauth2.common.exception.OAuthSystemException;
 import org.apache.oltu.oauth2.common.message.types.GrantType;
 import org.wso2.carbon.context.PrivilegedCarbonContext;
+import org.wso2.carbon.identity.action.execution.api.exception.ActionExecutionException;
+import org.wso2.carbon.identity.action.execution.api.model.ActionExecutionStatus;
+import org.wso2.carbon.identity.action.execution.api.model.ActionType;
+import org.wso2.carbon.identity.action.execution.api.model.Error;
+import org.wso2.carbon.identity.action.execution.api.model.Failure;
+import org.wso2.carbon.identity.action.execution.api.model.FlowContext;
 import org.wso2.carbon.identity.application.authentication.framework.exception.UserIdNotFoundException;
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
 import org.wso2.carbon.identity.base.IdentityConstants;
 import org.wso2.carbon.identity.base.IdentityException;
+import org.wso2.carbon.identity.central.log.mgt.utils.LogConstants;
 import org.wso2.carbon.identity.central.log.mgt.utils.LoggerUtils;
+import org.wso2.carbon.identity.core.util.IdentityTenantUtil;
 import org.wso2.carbon.identity.core.util.IdentityUtil;
 import org.wso2.carbon.identity.oauth.OAuthUtil;
 import org.wso2.carbon.identity.oauth.cache.CacheEntry;
@@ -38,11 +46,13 @@ import org.wso2.carbon.identity.oauth.cache.OAuthCache;
 import org.wso2.carbon.identity.oauth.cache.OAuthCacheKey;
 import org.wso2.carbon.identity.oauth.callback.OAuthCallback;
 import org.wso2.carbon.identity.oauth.callback.OAuthCallbackManager;
+import org.wso2.carbon.identity.oauth.common.OAuth2ErrorCodes;
 import org.wso2.carbon.identity.oauth.common.OAuthConstants;
 import org.wso2.carbon.identity.oauth.common.exception.InvalidOAuthClientException;
 import org.wso2.carbon.identity.oauth.config.OAuthServerConfiguration;
 import org.wso2.carbon.identity.oauth.dao.OAuthAppDO;
 import org.wso2.carbon.identity.oauth.internal.OAuthComponentServiceHolder;
+import org.wso2.carbon.identity.oauth2.IdentityOAuth2ClientException;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
 import org.wso2.carbon.identity.oauth2.OAuth2Service;
 import org.wso2.carbon.identity.oauth2.dao.OAuthTokenPersistenceFactory;
@@ -50,6 +60,8 @@ import org.wso2.carbon.identity.oauth2.dto.OAuth2AccessTokenReqDTO;
 import org.wso2.carbon.identity.oauth2.dto.OAuth2AccessTokenRespDTO;
 import org.wso2.carbon.identity.oauth2.internal.OAuth2ServiceComponentHolder;
 import org.wso2.carbon.identity.oauth2.model.AccessTokenDO;
+import org.wso2.carbon.identity.oauth2.rar.AuthorizationDetailsService;
+import org.wso2.carbon.identity.oauth2.rar.util.AuthorizationDetailsUtils;
 import org.wso2.carbon.identity.oauth2.token.OAuthTokenReqMessageContext;
 import org.wso2.carbon.identity.oauth2.token.OauthTokenIssuer;
 import org.wso2.carbon.identity.oauth2.util.OAuth2Util;
@@ -57,21 +69,26 @@ import org.wso2.carbon.identity.oauth2.util.Oauth2ScopeUtils;
 import org.wso2.carbon.identity.oauth2.validators.OAuth2ScopeHandler;
 import org.wso2.carbon.identity.oauth2.validators.scope.ScopeValidator;
 import org.wso2.carbon.identity.openidconnect.OIDCClaimUtil;
+import org.wso2.carbon.identity.organization.management.service.exception.OrganizationManagementException;
+import org.wso2.carbon.utils.DiagnosticLog;
 
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
+import static org.wso2.carbon.identity.oauth.common.OAuthConstants.OAUTH_APP;
+import static org.wso2.carbon.identity.oauth.common.OAuthConstants.RENEW_TOKEN_WITHOUT_REVOKING_EXISTING_ENABLE_CONFIG;
 import static org.wso2.carbon.identity.oauth.common.OAuthConstants.TokenBindings.NONE;
 import static org.wso2.carbon.identity.oauth.common.OAuthConstants.TokenStates.TOKEN_STATE_ACTIVE;
+import static org.wso2.carbon.identity.oauth.config.OAuthServerConfiguration.JWT_TOKEN_TYPE;
 import static org.wso2.carbon.identity.oauth2.util.OAuth2Util.EXTENDED_REFRESH_TOKEN_DEFAULT_TIME;
+import static org.wso2.carbon.identity.oauth2.util.OAuth2Util.JWT;
 
 /**
  * Abstract authorization grant handler.
@@ -86,6 +103,7 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
     protected static final String EXISTING_TOKEN_ISSUED = "existingTokenUsed";
     protected static final int SECONDS_TO_MILISECONDS_FACTOR = 1000;
     private boolean isHashDisabled = OAuth2Util.isHashDisabled();
+    protected AuthorizationDetailsService authorizationDetailsService;
 
     @Override
     public void init() throws IdentityOAuth2Exception {
@@ -95,6 +113,7 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
             cacheEnabled = true;
             oauthCache = OAuthCache.getInstance();
         }
+        this.authorizationDetailsService = OAuth2ServiceComponentHolder.getInstance().getAuthorizationDetailsService();
     }
 
     @Override
@@ -133,10 +152,20 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
             authorizedUserId = tokReqMsgCtx.getAuthorizedUser().getUserId();
         } catch (UserIdNotFoundException e) {
             throw new IdentityOAuth2Exception(
-                    "User id is not available for user: " + tokReqMsgCtx.getAuthorizedUser().getLoggableUserId(), e);
+                    "User id is not available for user: " +
+                            tokReqMsgCtx.getAuthorizedUser().getLoggableMaskedUserId(), e);
         }
         String authenticatedIDP = OAuth2Util.getAuthenticatedIDP(tokReqMsgCtx.getAuthorizedUser());
         String tokenBindingReference = getTokenBindingReference(tokReqMsgCtx);
+        String authorizedOrganization = getAuthorizedOrganization(tokReqMsgCtx);
+
+        // If the authorizedOrganization is deactivated or not available, return an error.
+        if (!(OAuthConstants.AuthorizedOrganization.NONE.equals(authorizedOrganization) ||
+                StringUtils.isBlank(authorizedOrganization)) &&
+                !OAuth2Util.isOrganizationValidAndActive(authorizedOrganization)) {
+            throw new IdentityOAuth2ClientException(OAuth2ErrorCodes.INVALID_REQUEST,
+                    "Organization : " + authorizedOrganization + " is invalid or inactive.");
+        }
 
         OauthTokenIssuer oauthTokenIssuer;
         try {
@@ -148,10 +177,33 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
 
         synchronized ((consumerKey + ":" + authorizedUserId + ":" + scope + ":" + tokenBindingReference).intern()) {
             AccessTokenDO existingTokenBean = null;
+
+            OAuthAppDO oAuthAppDO = (OAuthAppDO) tokReqMsgCtx.getProperty(OAUTH_APP);
+            String tokenType = oauthTokenIssuer.getAccessTokenType();
+
+            /*
+            Check if the token type is JWT and renew without revoking existing tokens is enabled.
+            Additionally, ensure that the grant type used for the token request is allowed to renew without revoke,
+            based on the config.
+            */
+            if (JWT.equalsIgnoreCase(tokenType) && getRenewWithoutRevokingExistingStatus() &&
+                    OAuth2ServiceComponentHolder.getJwtRenewWithoutRevokeAllowedGrantTypes()
+                            .contains(tokReqMsgCtx.getOauth2AccessTokenReqDTO().getGrantType())) {
+                /*
+                If the application does not have a token binding type (i.e., no specific binding type is set),
+                binding reference will be randomly generated UUID, in that case we can generate a new access token
+                without looking up the existing tokens in the token table.
+                */
+                if (oAuthAppDO.getTokenBindingType() == null) {
+                    return generateNewAccessToken(tokReqMsgCtx, scope, consumerKey, existingTokenBean,
+                            false, oauthTokenIssuer);
+                }
+            }
+
             if (isHashDisabled) {
                 existingTokenBean = getExistingToken(tokReqMsgCtx,
                         getOAuthCacheKey(scope, consumerKey, authorizedUserId, authenticatedIDP,
-                                tokenBindingReference));
+                                tokenBindingReference, authorizedOrganization));
             }
 
             if (existingTokenBean != null) {
@@ -259,7 +311,7 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
         Set<OAuth2ScopeHandler> scopeHandlers = OAuthServerConfiguration.getInstance().getOAuth2ScopeHandlers();
         boolean isValid = true;
 
-        for (OAuth2ScopeHandler scopeHandler: scopeHandlers) {
+        for (OAuth2ScopeHandler scopeHandler : scopeHandlers) {
             if (scopeHandler != null && scopeHandler.canHandle(tokReqMsgCtx)) {
                 isValid = scopeHandler.validateScope(tokReqMsgCtx);
                 if (log.isDebugEnabled()) {
@@ -268,18 +320,20 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
                 }
                 if (!isValid) {
                     if (LoggerUtils.isDiagnosticLogsEnabled()) {
-                        Map<String, Object> configs = new HashMap<>();
-                        configs.put("scopeValidator", scopeHandler.getClass().getCanonicalName());
-                        Map<String, Object> params = new HashMap<>();
-                        params.put("clientId", tokReqMsgCtx.getOauth2AccessTokenReqDTO().getClientId());
+                        DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = new
+                                DiagnosticLog.DiagnosticLogBuilder(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
+                                OAuthConstants.LogConstants.ActionIDs.SCOPE_VALIDATION);
+                        diagnosticLogBuilder.configParam("scope validator", scopeHandler.getClass().getCanonicalName())
+                                .inputParam(LogConstants.InputKeys.CLIENT_ID,
+                                        tokReqMsgCtx.getOauth2AccessTokenReqDTO().getClientId())
+                                .resultMessage("Scope validation failed against the configured scope validator.")
+                                .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION)
+                                .resultStatus(DiagnosticLog.ResultStatus.FAILED);
                         if (ArrayUtils.isNotEmpty(tokReqMsgCtx.getOauth2AccessTokenReqDTO().getScope())) {
                             List<String> scopes = Arrays.asList(tokReqMsgCtx.getOauth2AccessTokenReqDTO().getScope());
-                            params.put("scopes", scopes);
+                            diagnosticLogBuilder.inputParam("scopes", scopes);
                         }
-                        LoggerUtils.triggerDiagnosticLogEvent(OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE, params,
-                                OAuthConstants.LogConstants.FAILED,
-                                "Scope validation failed against the configured scope validator.", "validate-scope",
-                                configs);
+                        LoggerUtils.triggerDiagnosticLogEvent(diagnosticLogBuilder);
                     }
                     break;
                 }
@@ -305,6 +359,7 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
     @Override
     public boolean authorizeAccessDelegation(OAuthTokenReqMessageContext tokReqMsgCtx)
             throws IdentityOAuth2Exception {
+
         OAuthCallback authzCallback = new OAuthCallback(tokReqMsgCtx.getAuthorizedUser(),
                 tokReqMsgCtx.getOauth2AccessTokenReqDTO().getClientId(),
                 OAuthCallback.OAuthCallbackType.ACCESS_DELEGATION_TOKEN);
@@ -330,16 +385,24 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
                 OAuthConstants.UserType.APPLICATION_USER : OAuthConstants.UserType.APPLICATION;
     }
 
+    protected String getTokenType(OAuthTokenReqMessageContext tokReqMsgCtx) throws IdentityOAuth2Exception {
+
+        return isOfTypeApplicationUser(tokReqMsgCtx) ?
+                OAuthConstants.UserType.APPLICATION_USER : OAuthConstants.UserType.APPLICATION;
+    }
+
     protected void storeAccessToken(OAuth2AccessTokenReqDTO oAuth2AccessTokenReqDTO, String userStoreDomain,
                                     AccessTokenDO newTokenBean, String newAccessToken, AccessTokenDO
                                             existingTokenBean) throws IdentityOAuth2Exception {
         try {
             OAuthTokenPersistenceFactory.getInstance().getAccessTokenDAO()
                     .insertAccessToken(newAccessToken, oAuth2AccessTokenReqDTO.getClientId(),
-                    newTokenBean, existingTokenBean, userStoreDomain);
+                            newTokenBean, existingTokenBean, userStoreDomain);
         } catch (IdentityException e) {
+            String maskedToken = LoggerUtils.isLogMaskingEnable ? LoggerUtils.getMaskedContent(newAccessToken) :
+                    newAccessToken;
             throw new IdentityOAuth2Exception(
-                    "Error occurred while storing new access token : " + newAccessToken, e);
+                    "Error occurred while storing new access token : " + maskedToken, e);
         }
     }
 
@@ -396,6 +459,11 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
                     existingTokenBean.getTokenId(), true);
         }
 
+        if (AuthorizationDetailsUtils.isRichAuthorizationRequest(tokReqMsgCtx.getAuthorizationDetails())) {
+            this.authorizationDetailsService.replaceAccessTokenAuthorizationDetails(existingTokenBean.getTokenId(),
+                    existingTokenBean, tokReqMsgCtx);
+        }
+
         setDetailsToMessageContext(tokReqMsgCtx, existingTokenBean);
         return createResponseWithTokenBean(existingTokenBean, expireTime, scope);
     }
@@ -406,12 +474,14 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
                                                             OauthTokenIssuer oauthTokenIssuer)
             throws IdentityOAuth2Exception {
 
-        OAuthAppDO oAuthAppBean = getoAuthApp(consumerKey);
         Timestamp timestamp = new Timestamp(new Date().getTime());
-        long validityPeriodInMillis = getConfiguredExpiryTimeForApplication(tokReqMsgCtx, consumerKey, oAuthAppBean);
-        AccessTokenDO newTokenBean = createNewTokenBean(tokReqMsgCtx, oAuthAppBean, existingTokenBean, timestamp,
-                validityPeriodInMillis, oauthTokenIssuer);
-        setDetailsToMessageContext(tokReqMsgCtx, validityPeriodInMillis, newTokenBean, timestamp);
+        updateMessageContextToCreateNewToken(tokReqMsgCtx, consumerKey, existingTokenBean, timestamp);
+        ActionExecutionStatus<?> executionStatus = executePreIssueAccessTokenActions(tokReqMsgCtx);
+        if (executionStatus != null && (executionStatus.getStatus() == ActionExecutionStatus.Status.FAILED ||
+                executionStatus.getStatus() == ActionExecutionStatus.Status.ERROR)) {
+            return getFailureOrErrorResponseDTO(executionStatus);
+        }
+        AccessTokenDO newTokenBean = createNewTokenBean(tokReqMsgCtx, existingTokenBean, oauthTokenIssuer);
 
         /* Check whether the existing token needs to be expired and send the corresponding parameters to the
         persistAccessTokenInDB method. */
@@ -428,7 +498,67 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
 
         // Update cache with newly added token.
         updateCacheIfEnabled(newTokenBean, OAuth2Util.buildScopeString(tokReqMsgCtx.getScope()), oauthTokenIssuer);
-        return createResponseWithTokenBean(newTokenBean, validityPeriodInMillis, scope);
+        return createResponseWithTokenBean(newTokenBean, newTokenBean.getValidityPeriodInMillis(), scope);
+    }
+
+    private OAuth2AccessTokenRespDTO getFailureOrErrorResponseDTO(ActionExecutionStatus<?> executionStatus) {
+
+        OAuth2AccessTokenRespDTO accessTokenResponse = new OAuth2AccessTokenRespDTO();
+        accessTokenResponse.setError(true);
+        if (executionStatus.getStatus() == ActionExecutionStatus.Status.FAILED) {
+            Failure failureResponse = (Failure) executionStatus.getResponse();
+            accessTokenResponse.setErrorCode(failureResponse.getFailureReason());
+            accessTokenResponse.setErrorMsg(failureResponse.getFailureDescription());
+        } else if (executionStatus.getStatus() == ActionExecutionStatus.Status.ERROR) {
+            Error errorResponse = (Error) executionStatus.getResponse();
+            accessTokenResponse.setErrorCode(errorResponse.getErrorMessage());
+            accessTokenResponse.setErrorMsg(errorResponse.getErrorDescription());
+        }
+        return accessTokenResponse;
+    }
+
+    private ActionExecutionStatus<?> executePreIssueAccessTokenActions(
+            OAuthTokenReqMessageContext tokenReqMessageContext) throws IdentityOAuth2Exception {
+
+        ActionExecutionStatus<?> executionStatus = null;
+        if (checkExecutePreIssueAccessTokensActions(tokenReqMessageContext)) {
+
+            FlowContext flowContext = FlowContext.create().add("tokenMessageContext", tokenReqMessageContext);
+
+            try {
+                executionStatus = OAuthComponentServiceHolder.getInstance().getActionExecutorService()
+                        .execute(ActionType.PRE_ISSUE_ACCESS_TOKEN, flowContext,
+                                IdentityTenantUtil.getTenantDomain(IdentityTenantUtil.getLoginTenantId()));
+
+                if (log.isDebugEnabled()) {
+                    log.debug(String.format(
+                            "Invoked pre issue access token action for clientID: %s grant types: %s. Status: %s",
+                            tokenReqMessageContext.getOauth2AccessTokenReqDTO().getClientId(),
+                            tokenReqMessageContext.getOauth2AccessTokenReqDTO().getGrantType(),
+                            Optional.ofNullable(executionStatus).isPresent() ? executionStatus.getStatus() : "NA"));
+                }
+            } catch (ActionExecutionException e) {
+                throw new IdentityOAuth2Exception("Error occurred while executing pre issue access token actions.", e);
+            }
+        }
+        return executionStatus;
+    }
+
+    private boolean checkExecutePreIssueAccessTokensActions(OAuthTokenReqMessageContext tokenReqMessageContext)
+            throws IdentityOAuth2Exception {
+
+        OAuthAppDO oAuthAppBean = getoAuthApp(tokenReqMessageContext.getOauth2AccessTokenReqDTO().getClientId());
+        String grantType = tokenReqMessageContext.getOauth2AccessTokenReqDTO().getGrantType();
+
+        // Allow for following grant types and for JWT access tokens if,
+        // pre issue access token action invocation is enabled at server level.
+        return OAuthComponentServiceHolder.getInstance().getActionExecutorService()
+                .isExecutionEnabled(ActionType.PRE_ISSUE_ACCESS_TOKEN) &&
+                (OAuthConstants.GrantTypes.AUTHORIZATION_CODE.equals(grantType) ||
+                        OAuthConstants.GrantTypes.CLIENT_CREDENTIALS.equals(grantType) ||
+                        OAuthConstants.GrantTypes.PASSWORD.equals(grantType) ||
+                        OAuthConstants.GrantTypes.REFRESH_TOKEN.equals(grantType)) &&
+                JWT_TOKEN_TYPE.equals(oAuthAppBean.getTokenType());
     }
 
     private boolean isExistingTokenValid(AccessTokenDO existingTokenBean, long expireTime) {
@@ -449,10 +579,11 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
         return false;
     }
 
-    private AccessTokenDO createNewTokenBean(OAuthTokenReqMessageContext tokReqMsgCtx, OAuthAppDO oAuthAppBean,
-            AccessTokenDO existingTokenBean, Timestamp timestamp, long validityPeriodInMillis,
-            OauthTokenIssuer oauthTokenIssuer) throws IdentityOAuth2Exception {
+    private AccessTokenDO createNewTokenBean(OAuthTokenReqMessageContext tokReqMsgCtx, AccessTokenDO existingTokenBean,
+                                             OauthTokenIssuer oauthTokenIssuer) throws IdentityOAuth2Exception {
+
         String tenantDomain = tokReqMsgCtx.getOauth2AccessTokenReqDTO().getTenantDomain();
+
         OAuth2AccessTokenReqDTO tokenReq = tokReqMsgCtx.getOauth2AccessTokenReqDTO();
         validateGrantTypeParam(tokenReq);
 
@@ -464,49 +595,64 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
         newTokenBean.setTenantID(OAuth2Util.getTenantId(tenantDomain));
         newTokenBean.setTokenId(UUID.randomUUID().toString());
         newTokenBean.setGrantType(tokenReq.getGrantType());
+        newTokenBean.setAppResidentTenantId(IdentityTenantUtil.getLoginTenantId());
+        newTokenBean.setIsConsentedToken(tokReqMsgCtx.isConsentedToken());
+        newTokenBean.setTokenType(getTokenType(tokReqMsgCtx));
+        newTokenBean.setIssuedTime(new Timestamp(tokReqMsgCtx.getAccessTokenIssuedTime()));
+        newTokenBean.setAccessToken(getNewAccessToken(tokReqMsgCtx, oauthTokenIssuer));
+        newTokenBean.setValidityPeriodInMillis(tokReqMsgCtx.getValidityPeriod());
+        newTokenBean.setValidityPeriod(tokReqMsgCtx.getValidityPeriod() / SECONDS_TO_MILISECONDS_FACTOR);
+        newTokenBean.setTokenBinding(tokReqMsgCtx.getTokenBinding());
+        newTokenBean.setAccessTokenExtendedAttributes(tokenReq.getAccessTokenExtendedAttributes());
+        setRefreshTokenDetails(tokReqMsgCtx, existingTokenBean, newTokenBean, oauthTokenIssuer);
+
+        return newTokenBean;
+    }
+
+    private void updateMessageContextToCreateNewToken(OAuthTokenReqMessageContext tokReqMsgCtx, String consumerKey,
+                                                      AccessTokenDO existingTokenBean, Timestamp timestamp)
+            throws IdentityOAuth2Exception {
+
         /* If the existing token is available, the consented token flag will be extracted from that. Otherwise,
         from the current grant. */
         if (OAuth2ServiceComponentHolder.isConsentedTokenColumnEnabled()) {
             if (existingTokenBean != null) {
-                newTokenBean.setIsConsentedToken(existingTokenBean.isConsentedToken());
+                tokReqMsgCtx.setConsentedToken(existingTokenBean.isConsentedToken());
             } else {
-                if (OIDCClaimUtil.isConsentBasedClaimFilteringApplicable(tokenReq.getGrantType())) {
-                    newTokenBean.setIsConsentedToken(true);
+                if (OIDCClaimUtil.isConsentBasedClaimFilteringApplicable(
+                        tokReqMsgCtx.getOauth2AccessTokenReqDTO().getGrantType())) {
+                    tokReqMsgCtx.setConsentedToken(true);
                 }
             }
-            tokReqMsgCtx.setConsentedToken(newTokenBean.isConsentedToken());
         }
-        newTokenBean.setTokenType(getTokenType());
-        newTokenBean.setIssuedTime(timestamp);
-        newTokenBean.setAccessToken(getNewAccessToken(tokReqMsgCtx, oauthTokenIssuer));
-        newTokenBean.setValidityPeriodInMillis(validityPeriodInMillis);
-        newTokenBean.setValidityPeriod(validityPeriodInMillis / SECONDS_TO_MILISECONDS_FACTOR);
-        newTokenBean.setTokenBinding(tokReqMsgCtx.getTokenBinding());
-        newTokenBean.setAccessTokenExtendedAttributes(tokenReq.getAccessTokenExtendedAttributes());
-        setRefreshTokenDetails(tokReqMsgCtx, oAuthAppBean, existingTokenBean, timestamp, validityPeriodInMillis,
-                tokenReq, newTokenBean, oauthTokenIssuer);
-        return newTokenBean;
+        OAuthAppDO oAuthAppBean = getoAuthApp(consumerKey);
+        long validityPeriodInMillis = getConfiguredExpiryTimeForApplication(tokReqMsgCtx, consumerKey, oAuthAppBean);
+        tokReqMsgCtx.setValidityPeriod(validityPeriodInMillis);
+        tokReqMsgCtx.setAccessTokenIssuedTime(timestamp.getTime());
+        tokReqMsgCtx.setAudiences(OAuth2Util.getOIDCAudience(consumerKey, oAuthAppBean));
+
+        updateRefreshTokenValidityPeriodInMessageContext(oAuthAppBean, tokReqMsgCtx);
     }
 
-    private void setRefreshTokenDetails(OAuthTokenReqMessageContext tokReqMsgCtx, OAuthAppDO oAuthAppBean,
-            AccessTokenDO existingTokenBean, Timestamp timestamp, long validityPeriodInMillis,
-            OAuth2AccessTokenReqDTO tokenReq, AccessTokenDO newTokenBean, OauthTokenIssuer oauthTokenIssuer)
+    private void setRefreshTokenDetails(OAuthTokenReqMessageContext tokReqMsgCtx, AccessTokenDO existingTokenBean,
+                                        AccessTokenDO newTokenBean, OauthTokenIssuer oauthTokenIssuer)
             throws IdentityOAuth2Exception {
 
-        boolean isExtendedToken = newTokenBean.getAccessTokenExtendedAttributes() != null &&
-                newTokenBean.getAccessTokenExtendedAttributes().getRefreshTokenValidityPeriod() >
+        OAuth2AccessTokenReqDTO tokenReq = tokReqMsgCtx.getOauth2AccessTokenReqDTO();
+        boolean isExtendedToken = tokenReq.getAccessTokenExtendedAttributes() != null &&
+                tokenReq.getAccessTokenExtendedAttributes().getRefreshTokenValidityPeriod() >
                         EXTENDED_REFRESH_TOKEN_DEFAULT_TIME;
         /* Check whether the token renewal per request configuration is configured and the validation of the refresh
         token. If the token renewal per request configuration is enabled, renew the refresh token as well. */
-        if (!isTokenRenewalPerRequestConfigured() && isRefreshTokenValid(existingTokenBean, validityPeriodInMillis,
-                tokenReq.getClientId()) && !isExtendedToken) {
+        if (!isTokenRenewalPerRequestConfigured() &&
+                isRefreshTokenValid(existingTokenBean, tokReqMsgCtx.getValidityPeriod(),
+                        tokenReq.getClientId()) && !isExtendedToken) {
             setRefreshTokenDetailsFromExistingToken(existingTokenBean, newTokenBean);
         } else {
             // no valid refresh token found in existing Token
-            newTokenBean.setRefreshTokenIssuedTime(timestamp);
+            newTokenBean.setRefreshTokenIssuedTime(new Timestamp(tokReqMsgCtx.getAccessTokenIssuedTime()));
             // Set refresh token validity period.
-            newTokenBean.setRefreshTokenValidityPeriodInMillis(
-                    getRefreshTokenValidityPeriod(tokenReq.getClientId(), oAuthAppBean, tokReqMsgCtx));
+            newTokenBean.setRefreshTokenValidityPeriodInMillis(tokReqMsgCtx.getRefreshTokenvalidityPeriod());
             newTokenBean.setRefreshToken(getRefreshToken(tokReqMsgCtx, oauthTokenIssuer));
         }
     }
@@ -526,74 +672,78 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
                     ", Token State: " + TOKEN_STATE_ACTIVE +
                     ", accessTokenId for token binding: " + getTokenIdForTokenBinding(tokReqMsgCtx) +
                     ", bindingType: " + getTokenBindingType(tokReqMsgCtx) +
-                    " and bindingRef: " + getTokenBindingReference(tokReqMsgCtx));
+                    " and bindingRef: " + getTokenBindingReference(tokReqMsgCtx) +
+                    " and authorized organization: " + getAuthorizedOrganization(tokReqMsgCtx));
         }
         storeAccessToken(tokenReq, getUserStoreDomain(tokReqMsgCtx.getAuthorizedUser()), newTokenBean, newAccessToken,
                 existingTokenBean);
+        this.authorizationDetailsService
+                .storeOrReplaceAccessTokenAuthorizationDetails(newTokenBean, existingTokenBean, tokReqMsgCtx);
     }
 
     private void updateCacheIfEnabled(AccessTokenDO newTokenBean, String scope, OauthTokenIssuer oauthTokenIssuer)
             throws IdentityOAuth2Exception {
 
         if (isHashDisabled && cacheEnabled) {
-            AccessTokenDO tokenToCache = AccessTokenDO.clone(newTokenBean);
-            // If usePersistedAccessTokenAlias is enabled then in the DB the
-            // access token alias taken from the OauthTokenIssuer's getAccessTokenHash
-            // method is set as the token.
-            if (oauthTokenIssuer.usePersistedAccessTokenAlias()) {
-                try {
-                    String persistedTokenIdentifier =
-                            oauthTokenIssuer.getAccessTokenHash(newTokenBean.getAccessToken());
-                    tokenToCache.setAccessToken(persistedTokenIdentifier);
-                } catch (OAuthSystemException e) {
-                    if (log.isDebugEnabled()) {
-                        if (IdentityUtil.isTokenLoggable(IdentityConstants.IdentityTokens.ACCESS_TOKEN)) {
-                            log.debug("Token issuer: " + oauthTokenIssuer.getClass() + " was tried and" +
-                                    " failed to parse the received token: " + tokenToCache.getAccessToken(), e);
-                        } else {
-                            log.debug("Token issuer: " + oauthTokenIssuer.getClass() + " was tried and" +
-                                    " failed to parse the received token.", e);
+            /*
+             * If no token persistence, the token will be not be cached against a cache key with userId, scope, client,
+             * idp and binding reference. But, token will be cached and managed as an AccessTokenDO against the
+             * token identifier.
+             */
+            if (OAuth2Util.isTokenPersistenceEnabled()) {
+                AccessTokenDO tokenToCache = AccessTokenDO.clone(newTokenBean);
+                // If usePersistedAccessTokenAlias is enabled then in the DB the
+                // access token alias taken from the OauthTokenIssuer's getAccessTokenHash
+                // method is set as the token.
+                if (oauthTokenIssuer.usePersistedAccessTokenAlias()) {
+                    try {
+                        String persistedTokenIdentifier =
+                                oauthTokenIssuer.getAccessTokenHash(newTokenBean.getAccessToken());
+                        tokenToCache.setAccessToken(persistedTokenIdentifier);
+                    } catch (OAuthSystemException e) {
+                        if (log.isDebugEnabled()) {
+                            if (IdentityUtil.isTokenLoggable(IdentityConstants.IdentityTokens.ACCESS_TOKEN)) {
+                                log.debug("Token issuer: " + oauthTokenIssuer.getClass() + " was tried and" +
+                                        " failed to parse the received token: " + tokenToCache.getAccessToken(), e);
+                            } else {
+                                log.debug("Token issuer: " + oauthTokenIssuer.getClass() + " was tried and" +
+                                        " failed to parse the received token.", e);
+                            }
                         }
                     }
                 }
-            }
 
-            String userId;
-            try {
-                userId = tokenToCache.getAuthzUser().getUserId();
-            } catch (UserIdNotFoundException e) {
-                throw new IdentityOAuth2Exception(
-                        "User id is not available for user: " + tokenToCache.getAuthzUser().getLoggableUserId(), e);
-            }
+                String userId;
+                String authorizedOrganization;
+                try {
+                    userId = tokenToCache.getAuthzUser().getUserId();
+                    authorizedOrganization = tokenToCache.getAuthzUser().getAccessingOrganization();
+                    if (StringUtils.isBlank(authorizedOrganization)) {
+                        authorizedOrganization = OAuthConstants.AuthorizedOrganization.NONE;
+                    }
+                } catch (UserIdNotFoundException e) {
+                    throw new IdentityOAuth2Exception(
+                            "User id is not available for user: " +
+                                    tokenToCache.getAuthzUser().getLoggableMaskedUserId(), e);
+                }
 
-            String authenticatedIDP = OAuth2Util.getAuthenticatedIDP(tokenToCache.getAuthzUser());
-            OAuthCacheKey cacheKey = getOAuthCacheKey(scope, tokenToCache.getConsumerKey(), userId, authenticatedIDP,
-                    getTokenBindingReference(tokenToCache));
-            oauthCache.addToCache(cacheKey, tokenToCache);
-            if (log.isDebugEnabled()) {
-                log.debug("Access token was added to OAuthCache with cache key : " + cacheKey.getCacheKeyString());
+                String authenticatedIDP = OAuth2Util.getAuthenticatedIDP(tokenToCache.getAuthzUser());
+                OAuthCacheKey cacheKey = getOAuthCacheKey(scope, tokenToCache.getConsumerKey(), userId,
+                        authenticatedIDP, getTokenBindingReference(tokenToCache), authorizedOrganization);
+                oauthCache.addToCache(cacheKey, tokenToCache);
+                if (log.isDebugEnabled()) {
+                    log.debug("Access token was added to OAuthCache with cache key : " + cacheKey.getCacheKeyString());
+                }
             }
-
             // Adding AccessTokenDO to improve validation performance
             OAuth2Util.addTokenDOtoCache(newTokenBean);
         }
     }
 
-    private void setDetailsToMessageContext(OAuthTokenReqMessageContext tokReqMsgCtx, long validityPeriodInMillis,
-                                            AccessTokenDO newTokenBean, Timestamp timestamp) {
-        // set the validity period. this is needed by downstream handlers.
-        // if this is set before - then this will override it by the calculated new value.
-        tokReqMsgCtx.setValidityPeriod(validityPeriodInMillis);
+    private boolean getRenewWithoutRevokingExistingStatus() {
 
-        // set the refresh token validity period. this is needed by downstream handlers.
-        // if this is set before - then this will override it by the calculated new value.
-        tokReqMsgCtx.setRefreshTokenvalidityPeriod(newTokenBean.getRefreshTokenValidityPeriodInMillis());
-
-        // set access token issued time.this is needed by downstream handlers.
-        tokReqMsgCtx.setAccessTokenIssuedTime(timestamp.getTime());
-
-        // set refresh token issued time.this is needed by downstream handlers.
-        tokReqMsgCtx.setRefreshTokenIssuedTime(newTokenBean.getRefreshTokenIssuedTime().getTime());
+        return Boolean.parseBoolean(IdentityUtil.
+                getProperty(RENEW_TOKEN_WITHOUT_REVOKING_EXISTING_ENABLE_CONFIG));
     }
 
     private String getNewAccessToken(OAuthTokenReqMessageContext tokReqMsgCtx, OauthTokenIssuer oauthTokenIssuer)
@@ -605,6 +755,11 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
             }
             return newAccessToken;
         } catch (OAuthSystemException e) {
+            /* Below condition check is added in order to send a client error when the root cause of the exception is
+               actually a client error and not an internal server error. */
+            if (e.getCause() instanceof IdentityOAuth2ClientException) {
+                throw (IdentityOAuth2ClientException) e.getCause();
+            }
             throw new IdentityOAuth2Exception("Error while generating access token", e);
         }
     }
@@ -636,15 +791,14 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
         }
     }
 
-    private long getRefreshTokenValidityPeriod(String consumerKey, OAuthAppDO oAuthAppBean,
-                                               OAuthTokenReqMessageContext tokReqMsgCtx) {
+    private void updateRefreshTokenValidityPeriodInMessageContext(OAuthAppDO oAuthAppBean,
+                                                                  OAuthTokenReqMessageContext tokReqMsgCtx) {
+
         long refreshTokenValidityPeriodInMillis;
         long validityPeriodFromMsgContext = tokReqMsgCtx.getRefreshTokenvalidityPeriod();
 
-        if (validityPeriodFromMsgContext != OAuthConstants.UNASSIGNED_VALIDITY_PERIOD
-                && validityPeriodFromMsgContext > 0) {
-            refreshTokenValidityPeriodInMillis = validityPeriodFromMsgContext *
-                    SECONDS_TO_MILISECONDS_FACTOR;
+        if (validityPeriodFromMsgContext > 0) {
+            refreshTokenValidityPeriodInMillis = validityPeriodFromMsgContext * SECONDS_TO_MILISECONDS_FACTOR;
             if (log.isDebugEnabled()) {
                 log.debug("OAuth application id : " + oAuthAppBean.getOauthConsumerKey() + ", using refresh token " +
                         "validity period configured from OAuthTokenReqMessageContext: " +
@@ -654,14 +808,15 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
             refreshTokenValidityPeriodInMillis =
                     oAuthAppBean.getRefreshTokenExpiryTime() * SECONDS_TO_MILISECONDS_FACTOR;
             if (log.isDebugEnabled()) {
-                log.debug("OAuth application id : " + consumerKey + ", refresh token validity time " +
-                        refreshTokenValidityPeriodInMillis + "ms");
+                log.debug("OAuth application id : " + oAuthAppBean.getOauthConsumerKey() +
+                        ", refresh token validity time " + refreshTokenValidityPeriodInMillis + "ms");
             }
         } else {
             refreshTokenValidityPeriodInMillis = OAuthServerConfiguration.getInstance()
                     .getRefreshTokenValidityPeriodInSeconds() * SECONDS_TO_MILISECONDS_FACTOR;
         }
-        return refreshTokenValidityPeriodInMillis;
+
+        tokReqMsgCtx.setRefreshTokenvalidityPeriod(refreshTokenValidityPeriodInMillis);
     }
 
     private void addTokenToCache(OAuthCacheKey cacheKey, AccessTokenDO existingAccessTokenDO) {
@@ -690,14 +845,29 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
         OAuthAppDO oAuthAppDO;
         String consumerKey = existingAccessTokenDO.getConsumerKey();
         try {
-            oAuthAppDO = OAuth2Util.getAppInformationByClientId(consumerKey);
+            String tenantDomain = PrivilegedCarbonContext.getThreadLocalCarbonContext().getTenantDomain();
+            String applicationResidentOrgId = PrivilegedCarbonContext.getThreadLocalCarbonContext()
+                    .getApplicationResidentOrganizationId();
+            /*
+             If applicationResidentOrgId is not empty, then the request comes for an application which is registered
+             directly in the organization of the applicationResidentOrgId. Therefore, the tenant domain should be
+             extracted from the organization id to get the information of the application.
+            */
+            if (StringUtils.isNotEmpty(applicationResidentOrgId)) {
+                tenantDomain = OAuth2ServiceComponentHolder.getInstance().getOrganizationManager()
+                        .resolveTenantDomain(applicationResidentOrgId);
+            }
+            oAuthAppDO = OAuth2Util.getAppInformationByClientId(consumerKey, tenantDomain);
         } catch (InvalidOAuthClientException e) {
             throw new IdentityOAuth2Exception("Error while retrieving app information for client_id : " + consumerKey,
                     e);
+        } catch (OrganizationManagementException e) {
+            throw new IdentityOAuth2Exception("Error while resolving tenant domain from the organization id: ", e);
         }
 
-        if (issueRefreshToken() && OAuthServerConfiguration.getInstance().getSupportedGrantTypes().containsKey(
-                GrantType.REFRESH_TOKEN.toString())) {
+        if (issueRefreshToken(existingAccessTokenDO.getTokenType()) &&
+                OAuthServerConfiguration.getInstance().getSupportedGrantTypes().containsKey(
+                        GrantType.REFRESH_TOKEN.toString())) {
             String grantTypes = oAuthAppDO.getGrantTypes();
             List<String> supportedGrantTypes = new ArrayList<>();
             if (StringUtils.isNotEmpty(grantTypes)) {
@@ -725,17 +895,30 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
     }
 
     private OAuthCacheKey getOAuthCacheKey(String scope, String consumerKey, String authorizedUserId,
-                                           String authenticatedIDP, String tokenBindingType) {
+                                           String authenticatedIDP, String tokenBindingType,
+                                           String authorizedOrganization) {
 
-        String cacheKeyString = OAuth2Util.buildCacheKeyStringForTokenWithUserId(consumerKey, scope, authorizedUserId,
-                authenticatedIDP, tokenBindingType);
+        String cacheKeyString = OAuth2Util.buildCacheKeyStringForTokenWithUserIdOrgId(consumerKey, scope,
+                authorizedUserId, authenticatedIDP, tokenBindingType, authorizedOrganization);
         return new OAuthCacheKey(cacheKeyString);
     }
 
     private OAuthAppDO getoAuthApp(String consumerKey) throws IdentityOAuth2Exception {
         OAuthAppDO oAuthAppBean;
         try {
-            oAuthAppBean = OAuth2Util.getAppInformationByClientId(consumerKey);
+            String tenantDomain = PrivilegedCarbonContext.getThreadLocalCarbonContext().getTenantDomain();
+            String applicationResidentOrgId = PrivilegedCarbonContext.getThreadLocalCarbonContext()
+                    .getApplicationResidentOrganizationId();
+            /*
+             If applicationResidentOrgId is not empty, then the request comes for an application which is registered
+             directly in the organization of the applicationResidentOrgId. Therefore, the tenant domain should be
+             extracted from the organization id to get the information of the application.
+            */
+            if (StringUtils.isNotEmpty(applicationResidentOrgId)) {
+                tenantDomain = OAuth2ServiceComponentHolder.getInstance().getOrganizationManager()
+                        .resolveTenantDomain(applicationResidentOrgId);
+            }
+            oAuthAppBean = OAuth2Util.getAppInformationByClientId(consumerKey, tenantDomain);
             if (log.isDebugEnabled()) {
                 log.debug("Service Provider specific expiry time enabled for application : " + consumerKey +
                         ". Application access token expiry time : " + oAuthAppBean.getApplicationAccessTokenExpiryTime()
@@ -744,6 +927,8 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
             }
         } catch (InvalidOAuthClientException e) {
             throw new IdentityOAuth2Exception("Error while retrieving app information for clientId: " + consumerKey, e);
+        } catch (OrganizationManagementException e) {
+            throw new IdentityOAuth2Exception("Error while resolving tenant domain from the organization id: ", e);
         }
         return oAuthAppBean;
     }
@@ -757,7 +942,7 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
      */
     private long getAccessTokenExpiryTimeMillis(AccessTokenDO existingAccessTokenDO) throws IdentityOAuth2Exception {
         long expireTimeMillis;
-        if (issueRefreshToken()) {
+        if (issueRefreshToken(existingAccessTokenDO.getTokenType())) {
             // Consider both access and refresh expiry time
             expireTimeMillis = OAuth2Util.getTokenExpireTimeMillis(existingAccessTokenDO, false);
         } else {
@@ -801,7 +986,7 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
                                                        OAuthAppDO oAuthAppBean) throws IdentityOAuth2Exception {
         long validityPeriodInMillis;
 
-        if (isOfTypeApplicationUser()) {
+        if (isOfTypeApplicationUser(tokReqMsgCtx)) {
             validityPeriodInMillis = getValidityPeriodForApplicationUser(consumerKey, oAuthAppBean);
         } else {
             validityPeriodInMillis = getValidityPeriodForApplication(consumerKey, oAuthAppBean);
@@ -868,11 +1053,16 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
         OAuth2AccessTokenReqDTO tokenReq = tokenMsgCtx.getOauth2AccessTokenReqDTO();
         String scope = OAuth2Util.buildScopeString(tokenMsgCtx.getScope());
         String tokenBindingReference = getTokenBindingReference(tokenMsgCtx);
+        String authorizedOrganization = getAuthorizedOrganization(tokenMsgCtx);
 
-        if (cacheEnabled) {
+        if (cacheEnabled && OAuth2Util.isTokenPersistenceEnabled()) {
+            /*
+             * If no token persistence, the token is not cached against a cache key with userId, scope, client,
+             * idp and binding reference as, multiple active tokens can exist for the same key.
+             */
             existingToken = getExistingTokenFromCache(cacheKey, tokenReq.getClientId(),
                     tokenMsgCtx.getAuthorizedUser().getLoggableUserId(), scope, tokenBindingReference,
-                    tokenMsgCtx.getAuthorizedUser().getTenantDomain());
+                    authorizedOrganization, tokenMsgCtx.getAuthorizedUser().getTenantDomain());
         }
 
         if (existingToken == null) {
@@ -912,7 +1102,8 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
     }
 
     private AccessTokenDO getExistingTokenFromCache(OAuthCacheKey cacheKey, String consumerKey, String loggableUserId,
-                                                    String scope, String tokenBindingReference, String tenantDomain)
+                                                    String scope, String tokenBindingReference,
+                                                    String authorizedOrganization, String tenantDomain)
             throws IdentityOAuth2Exception {
 
         AccessTokenDO existingToken = null;
@@ -923,7 +1114,8 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
                 log.debug("Retrieved active access token(hashed): " + DigestUtils
                         .sha256Hex(existingToken.getAccessToken()) + " in the state: " + existingToken.getTokenState()
                         + " for client Id: " + consumerKey + ", user: " + loggableUserId + " ,scope: " + scope
-                        + " and token binding reference: " + tokenBindingReference + " from cache");
+                        + " and token binding reference: " + tokenBindingReference + " and authorized organization: "
+                        + authorizedOrganization + " from cache");
             }
             if (getAccessTokenExpiryTimeMillis(existingToken) == 0) {
                 // Token is expired. Clear it from cache.
@@ -1013,13 +1205,16 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
         return OAuthServerConfiguration.getInstance().isTokenRenewalPerRequestEnabled();
     }
 
-    private void clearExistingTokenFromCache(OAuthTokenReqMessageContext tokenMsgCtx, AccessTokenDO existingTokenBean) {
+    private void clearExistingTokenFromCache(OAuthTokenReqMessageContext tokenMsgCtx, AccessTokenDO existingTokenBean)
+            throws IdentityOAuth2Exception {
 
         if (cacheEnabled) {
             String tokenBindingReference = getTokenBindingReference(tokenMsgCtx);
+            String authorizedOrganization = getAuthorizedOrganization(tokenMsgCtx);
 
             OAuthUtil.clearOAuthCache(existingTokenBean.getConsumerKey(), existingTokenBean.getAuthzUser(),
-                    OAuth2Util.buildScopeString(existingTokenBean.getScope()), tokenBindingReference);
+                    OAuth2Util.buildScopeString(existingTokenBean.getScope()), tokenBindingReference,
+                    authorizedOrganization);
             OAuthUtil.clearOAuthCache(existingTokenBean.getConsumerKey(), existingTokenBean.getAuthzUser(),
                     OAuth2Util.buildScopeString(existingTokenBean.getScope()));
             OAuthUtil.clearOAuthCache(existingTokenBean.getConsumerKey(), existingTokenBean.getAuthzUser());
@@ -1048,18 +1243,82 @@ public abstract class AbstractAuthorizationGrantHandler implements Authorization
      * @param tokReqMsgCtx OAuthTokenReqMessageContext.
      * @return token binding reference.
      */
-    private String getTokenBindingReference(OAuthTokenReqMessageContext tokReqMsgCtx) {
+    protected String getTokenBindingReference(OAuthTokenReqMessageContext tokReqMsgCtx)
+            throws IdentityOAuth2Exception {
 
-        if (tokReqMsgCtx.getTokenBinding() == null) {
-            if (log.isDebugEnabled()) {
-                log.debug("Token binding data is null.");
+        /**
+         * If OAuth.JWT.RenewTokenWithoutRevokingExisting is enabled from configurations, and current token
+         * binding is null,then we will add a new token binding (request binding) to the token binding with
+         * a value of a random UUID.
+         * The purpose of this new token binding type is to add a random value to the token binding so that
+         * "User, Application, Scope, Binding" combination will be unique for each token.
+         * Previously, if a token issue request come for the same combination of "User, Application, Scope, Binding",
+         * the existing JWT token will be revoked and issue a new token. but with this way, we can issue new tokens
+         * without revoking the old ones.
+         *
+         * Add following configuration to deployment.toml file to enable this feature.
+         *     [oauth.jwt.renew_token_without_revoking_existing]
+         *     enable = true
+         *
+         * By default, the allowed grant type for this feature is "client_credentials". If you need to enable for
+         * other grant types, add the following configuration to deployment.toml file.
+         *     [oauth.jwt.renew_token_without_revoking_existing]
+         *     enable = true
+         *     allowed_grant_types = ["client_credentials","password", ...]
+         */
+        String consumerKey = tokReqMsgCtx.getOauth2AccessTokenReqDTO().getClientId();
+        OauthTokenIssuer oauthTokenIssuer;
+
+        try {
+            oauthTokenIssuer = OAuth2Util.getOAuthTokenIssuerForOAuthApp(consumerKey);
+        } catch (InvalidOAuthClientException | IdentityOAuth2Exception e) {
+            throw new IdentityOAuth2Exception(
+                    "Error while retrieving oauth issuer for the app with clientId: " + consumerKey, e);
+        }
+
+        String tokenType = oauthTokenIssuer.getAccessTokenType();
+
+        if (JWT.equalsIgnoreCase(tokenType)) {
+            if (getRenewWithoutRevokingExistingStatus()
+                    && tokReqMsgCtx != null && (tokReqMsgCtx.getTokenBinding() == null
+                    || StringUtils.isBlank(tokReqMsgCtx.getTokenBinding().getBindingReference()))) {
+                if (OAuth2ServiceComponentHolder.getJwtRenewWithoutRevokeAllowedGrantTypes()
+                        .contains(tokReqMsgCtx.getOauth2AccessTokenReqDTO().getGrantType())) {
+                    return UUID.randomUUID().toString();
+                }
+                return NONE;
             }
+        }
+        return getExistingTokenBindingReference(tokReqMsgCtx);
+    }
+
+    /**
+     * Retrieves the existing token binding reference if available, otherwise returns NONE.
+     *
+     * @param tokReqMsgCtx OAuthTokenReqMessageContext.
+     * @return token binding reference.
+     */
+    private String getExistingTokenBindingReference(OAuthTokenReqMessageContext tokReqMsgCtx) {
+
+        if (tokReqMsgCtx == null || tokReqMsgCtx.getTokenBinding() == null) {
             return NONE;
         }
-        if (StringUtils.isBlank(tokReqMsgCtx.getTokenBinding().getBindingReference())) {
-            return NONE;
+        String bindingReference = tokReqMsgCtx.getTokenBinding().getBindingReference();
+        return StringUtils.isBlank(bindingReference) ? NONE : bindingReference;
+    }
+
+    /**
+     * Get the user authorized organization to access.
+     *
+     * @param tokReqMsgCtx OAuthTokenReqMessageContext.
+     * @return User authorized organization.
+     */
+    private String getAuthorizedOrganization(OAuthTokenReqMessageContext tokReqMsgCtx) {
+
+        if (StringUtils.isEmpty(tokReqMsgCtx.getAuthorizedUser().getAccessingOrganization())) {
+            return OAuthConstants.AuthorizedOrganization.NONE;
         }
-        return tokReqMsgCtx.getTokenBinding().getBindingReference();
+        return tokReqMsgCtx.getAuthorizedUser().getAccessingOrganization();
     }
 
     /**

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
+ * Copyright (c) 2018-2025, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
  *
  * WSO2 Inc. licenses this file to you under the Apache License,
  * Version 2.0 (the "License"); you may not use this file except
@@ -18,20 +18,26 @@
 
 package org.wso2.carbon.identity.oauth2.client.authentication;
 
-import org.apache.axiom.util.base64.Base64Utils;
 import org.apache.axis2.transport.http.HTTPConstants;
 import org.apache.commons.io.Charsets;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.oltu.oauth2.common.OAuth;
+import org.wso2.carbon.context.PrivilegedCarbonContext;
+import org.wso2.carbon.identity.core.util.IdentityTenantUtil;
 import org.wso2.carbon.identity.oauth.IdentityOAuthAdminException;
 import org.wso2.carbon.identity.oauth.common.OAuth2ErrorCodes;
 import org.wso2.carbon.identity.oauth.common.exception.InvalidOAuthClientException;
+import org.wso2.carbon.identity.oauth.internal.OAuthComponentServiceHolder;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
 import org.wso2.carbon.identity.oauth2.bean.OAuthClientAuthnContext;
+import org.wso2.carbon.identity.oauth2.model.ClientAuthenticationMethodModel;
 import org.wso2.carbon.identity.oauth2.util.OAuth2Util;
+import org.wso2.carbon.identity.organization.management.service.exception.OrganizationManagementException;
 
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
@@ -49,6 +55,10 @@ public class BasicAuthClientAuthenticator extends AbstractOAuthClientAuthenticat
     private static final String SIMPLE_CASE_AUTHORIZATION_HEADER = "authorization";
     private static final String BASIC_PREFIX = "Basic";
     private static final int CREDENTIAL_LENGTH = 2;
+    private static final String CLIENT_SECRET_BASIC = "client_secret_basic";
+    private static final String CLIENT_SECRET_POST = "client_secret_post";
+    private static final String CLIENT_SECRET_BASIC_DISPLAY_NAME = "Client Secret Basic";
+    private static final String CLIENT_SECRET_POST_DISPLAY_NAME = "Client Secret Post";
 
     /**
      * Returns the execution order of this authenticator
@@ -83,14 +93,31 @@ public class BasicAuthClientAuthenticator extends AbstractOAuthClientAuthenticat
                 log.debug("Authenticating client : " + oAuthClientAuthnContext.getClientId() + " with client " +
                         "secret.");
             }
+            String tenantDomain = IdentityTenantUtil.resolveTenantDomain();
+            String appOrgId = PrivilegedCarbonContext.getThreadLocalCarbonContext()
+                    .getApplicationResidentOrganizationId();
+            /*
+             If appOrgId is not empty, then the request comes for an application which is registered directly in the
+             organization of the appOrgId. Therefore, we need to resolve the tenant domain of the organization.
+            */
+            if (StringUtils.isNotEmpty(appOrgId)) {
+                try {
+                    tenantDomain = OAuthComponentServiceHolder.getInstance().getOrganizationManager()
+                            .resolveTenantDomain(appOrgId);
+                } catch (OrganizationManagementException e) {
+                    throw new InvalidOAuthClientException("Error while resolving tenant domain for the organization " +
+                            "ID: " + appOrgId, e);
+                }
+            }
+            // Authenticating the client with the client id, the client secret and the extracted tenant domain.
             return OAuth2Util.authenticateClient(oAuthClientAuthnContext.getClientId(),
-                    (String) oAuthClientAuthnContext.getParameter(OAuth.OAUTH_CLIENT_SECRET));
+                    (String) oAuthClientAuthnContext.getParameter(OAuth.OAUTH_CLIENT_SECRET), tenantDomain);
         } catch (IdentityOAuthAdminException e) {
-            throw new OAuthClientAuthnException(OAuth2ErrorCodes.INVALID_CLIENT, "Error while authenticating " +
-                    "client", e);
+            throw new OAuthClientAuthnException("Error while authenticating client",
+                    OAuth2ErrorCodes.INVALID_CLIENT, e);
         } catch (InvalidOAuthClientException | IdentityOAuth2Exception e) {
-            throw new OAuthClientAuthnException(OAuth2ErrorCodes.INVALID_CLIENT,
-                    "Invalid Client : " + oAuthClientAuthnContext.getClientId(), e);
+            throw new OAuthClientAuthnException("Invalid Client : " + oAuthClientAuthnContext.getClientId(),
+                    OAuth2ErrorCodes.INVALID_CLIENT, e);
         }
 
     }
@@ -242,15 +269,21 @@ public class BasicAuthClientAuthenticator extends AbstractOAuthClientAuthenticat
     protected static String[] extractCredentialsFromAuthzHeader(String authorizationHeader, OAuthClientAuthnContext
             oAuthClientAuthnContext) throws OAuthClientAuthnException {
 
-        String[] splitValues = authorizationHeader.trim().split(" ");
-        if (splitValues.length == CREDENTIAL_LENGTH) {
-            byte[] decodedBytes = Base64Utils.decode(splitValues[1].trim());
-            String userNamePassword = new String(decodedBytes, Charsets.UTF_8);
-            String[] credentials = userNamePassword.split(CREDENTIAL_SEPARATOR);
-            if (credentials.length == CREDENTIAL_LENGTH) {
-                return credentials;
+        try {
+            String[] authHeaderComponents = authorizationHeader.trim().split(" ");
+            if (authHeaderComponents.length == CREDENTIAL_LENGTH) {
+                byte[] decodedBytes = Base64.getDecoder().decode(authHeaderComponents[1].trim());
+                String userNamePassword = new String(decodedBytes, Charsets.UTF_8);
+                String[] credentials = userNamePassword.split(CREDENTIAL_SEPARATOR);
+                if (credentials.length == CREDENTIAL_LENGTH) {
+                    return credentials;
+                }
             }
+        } catch (IllegalArgumentException e) {
+            throw new OAuthClientAuthnException("Error decoding authorization header. " + e.getMessage(),
+                    OAuth2ErrorCodes.INVALID_CLIENT);
         }
+
         String errMsg = "Error decoding authorization header. Space delimited \"<authMethod> <base64Hash>\" format " +
                 "violated.";
         throw new OAuthClientAuthnException(errMsg, OAuth2ErrorCodes.INVALID_CLIENT);
@@ -267,6 +300,22 @@ public class BasicAuthClientAuthenticator extends AbstractOAuthClientAuthenticat
         Map<String, String> stringContent = getBodyParameters(bodyParams);
         context.setClientId(stringContent.get(OAuth.OAUTH_CLIENT_ID));
         context.addParameter(OAuth.OAUTH_CLIENT_SECRET, stringContent.get(OAuth.OAUTH_CLIENT_SECRET));
+    }
+
+    /**
+     * Retrieve the authentication methods supported by the authenticator.
+     *
+     * @return      Authentication methods supported by the authenticator.
+     */
+    @Override
+    public List<ClientAuthenticationMethodModel> getSupportedClientAuthenticationMethods() {
+
+        List<ClientAuthenticationMethodModel> supportedAuthMethods = new ArrayList<>();
+        supportedAuthMethods.add(new ClientAuthenticationMethodModel(CLIENT_SECRET_BASIC,
+                CLIENT_SECRET_BASIC_DISPLAY_NAME));
+        supportedAuthMethods.add(new ClientAuthenticationMethodModel(CLIENT_SECRET_POST,
+                CLIENT_SECRET_POST_DISPLAY_NAME));
+        return supportedAuthMethods;
     }
 
 }

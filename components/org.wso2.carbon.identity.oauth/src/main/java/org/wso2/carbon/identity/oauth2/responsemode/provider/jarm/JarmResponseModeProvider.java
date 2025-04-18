@@ -134,8 +134,11 @@ public abstract class JarmResponseModeProvider extends AbstractResponseModeProvi
 
         jwtClaimsSet.claim(EXPIRATION_TIME, expirationTime);
 
-        if (StringUtils.isNotBlank(authorizationResponseDTO.getSessionState())) {
+        if (StringUtils.isNotBlank(authorizationResponseDTO.getState())) {
             jwtClaimsSet.claim(STATE, authorizationResponseDTO.getState());
+        }
+        if (StringUtils.isNotBlank(authorizationResponseDTO.getSessionState())) {
+            jwtClaimsSet.claim(SESSION_STATE, authorizationResponseDTO.getSessionState());
         }
 
         return jwtClaimsSet.build();
@@ -177,7 +180,8 @@ public abstract class JarmResponseModeProvider extends AbstractResponseModeProvi
     protected static String getIssuer(AuthorizationResponseDTO authorizationResponseDTO) throws OAuthSystemException {
 
         try {
-            return OAuth2Util.getIdTokenIssuer(authorizationResponseDTO.getSigningTenantDomain());
+            return OAuth2Util.getIdTokenIssuer(authorizationResponseDTO.getSigningTenantDomain(),
+                    authorizationResponseDTO.isMtlsRequest());
         } catch (IdentityOAuth2Exception e) {
             authorizationResponseDTO.setError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
                     "Error getting Id Token Issuer.", OAuth2ErrorCodes.SERVER_ERROR);

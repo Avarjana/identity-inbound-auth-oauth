@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
+ * Copyright (c) 2018-2025, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
  *
  * WSO2 Inc. licenses this file to you under the Apache License,
  * Version 2.0 (the "License"); you may not use this file except
@@ -21,8 +21,9 @@ package org.wso2.carbon.identity.oauth2.client.authentication;
 import org.apache.axis2.transport.http.HTTPConstants;
 import org.apache.commons.lang.StringUtils;
 import org.apache.oltu.oauth2.common.OAuth;
-import org.powermock.api.mockito.PowerMockito;
-import org.powermock.core.classloader.annotations.PrepareForTest;
+import org.mockito.MockedStatic;
+import org.testng.Assert;
+import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
@@ -32,33 +33,31 @@ import org.wso2.carbon.identity.core.util.IdentityUtil;
 import org.wso2.carbon.identity.oauth.IdentityOAuthAdminException;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
 import org.wso2.carbon.identity.oauth2.bean.OAuthClientAuthnContext;
+import org.wso2.carbon.identity.oauth2.model.ClientAuthenticationMethodModel;
 import org.wso2.carbon.identity.oauth2.util.OAuth2Util;
-import org.wso2.carbon.identity.testutil.powermock.PowerMockIdentityBaseTest;
 
 import java.io.File;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 
 import javax.servlet.http.HttpServletRequest;
 
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
-import static org.powermock.api.mockito.PowerMockito.when;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 import static org.testng.Assert.assertEquals;
 
-@PrepareForTest({
-        HttpServletRequest.class,
-        OAuth2Util.class,
-        IdentityUtil.class
-})
 @WithCarbonHome
-public class BasicAuthClientAuthenticatorTest extends PowerMockIdentityBaseTest {
+public class BasicAuthClientAuthenticatorTest {
 
     private BasicAuthClientAuthenticator basicAuthClientAuthenticator = new BasicAuthClientAuthenticator();
     private static final String SIMPLE_CASE_AUTHORIZATION_HEADER = "authorization";
     private static final String CLIENT_ID = "someclientid";
     private static final String CLIENT_SECRET = "someclientsecret";
+    private MockedStatic<IdentityUtil> identityUtil;
 
     @BeforeMethod
     public void setUp() {
@@ -66,13 +65,19 @@ public class BasicAuthClientAuthenticatorTest extends PowerMockIdentityBaseTest 
                 CarbonBaseConstants.CARBON_HOME,
                 Paths.get(System.getProperty("user.dir"), "src", "test", "resources").toString()
         );
-        mockStatic(IdentityUtil.class);
-        when(IdentityUtil.getIdentityConfigDirPath())
+        identityUtil = mockStatic(IdentityUtil.class);
+        identityUtil.when(IdentityUtil::getIdentityConfigDirPath)
                 .thenReturn(System.getProperty("user.dir")
                         + File.separator + "src"
                         + File.separator + "test"
                         + File.separator + "resources"
                         + File.separator + "conf");
+    }
+
+    @AfterMethod
+    public void tearDown() {
+
+        identityUtil.close();
     }
 
     @Test
@@ -106,16 +111,17 @@ public class BasicAuthClientAuthenticatorTest extends PowerMockIdentityBaseTest 
                                        Object oAuthClientAuthnContextObj, boolean isAuthenticated,
                                        boolean authenticationResult) throws Exception {
 
-        OAuthClientAuthnContext oAuthClientAuthnContext = (OAuthClientAuthnContext) oAuthClientAuthnContextObj;
-        HttpServletRequest httpServletRequest = PowerMockito.mock(HttpServletRequest.class);
+        try (MockedStatic<OAuth2Util> oAuth2Util = mockStatic(OAuth2Util.class)) {
+            OAuthClientAuthnContext oAuthClientAuthnContext = (OAuthClientAuthnContext) oAuthClientAuthnContextObj;
+            HttpServletRequest httpServletRequest = mock(HttpServletRequest.class);
 
-        mockStatic(OAuth2Util.class);
-        when(OAuth2Util.authenticateClient(anyString(), anyString())).thenReturn
-                (isAuthenticated);
-        when(httpServletRequest.getHeader(headerName)).thenReturn(headerValue);
-        assertEquals(basicAuthClientAuthenticator.authenticateClient(httpServletRequest, bodyContent,
-                oAuthClientAuthnContext), authenticationResult, "Expected client authentication result was not " +
-                "received");
+            oAuth2Util.when(() -> OAuth2Util.authenticateClient(anyString(), anyString(), anyString())).thenReturn
+                    (isAuthenticated);
+            when(httpServletRequest.getHeader(headerName)).thenReturn(headerValue);
+            assertEquals(basicAuthClientAuthenticator.authenticateClient(httpServletRequest, bodyContent,
+                    oAuthClientAuthnContext), authenticationResult, "Expected client authentication result was not " +
+                    "received");
+        }
     }
 
     @DataProvider(name = "testClientAuthnDataErrorScenario")
@@ -146,20 +152,21 @@ public class BasicAuthClientAuthenticatorTest extends PowerMockIdentityBaseTest 
     public void testAuthenticateClientExeption(String headerName, String headerValue, HashMap<String, List> bodyContent,
                                                Object oAuthClientAuthnContextObj, Object exception) throws Exception {
 
-        OAuthClientAuthnContext oAuthClientAuthnContext = (OAuthClientAuthnContext) oAuthClientAuthnContextObj;
-        HttpServletRequest httpServletRequest = PowerMockito.mock(HttpServletRequest.class);
-        mockStatic(OAuth2Util.class);
+        try (MockedStatic<OAuth2Util> oAuth2Util = mockStatic(OAuth2Util.class)) {
+            OAuthClientAuthnContext oAuthClientAuthnContext = (OAuthClientAuthnContext) oAuthClientAuthnContextObj;
+            HttpServletRequest httpServletRequest = mock(HttpServletRequest.class);
 
-        if (exception instanceof IdentityOAuthAdminException) {
-            when(OAuth2Util.authenticateClient(anyString(), anyString())).thenThrow(
-                    (IdentityOAuthAdminException) exception);
-        } else if (exception instanceof IdentityOAuth2Exception) {
-            when(OAuth2Util.authenticateClient(anyString(), anyString())).thenThrow(
-                    (IdentityOAuth2Exception) exception);
+            if (exception instanceof IdentityOAuthAdminException) {
+                oAuth2Util.when(() -> OAuth2Util.authenticateClient(anyString(), anyString(), anyString())).thenThrow(
+                        (IdentityOAuthAdminException) exception);
+            } else if (exception instanceof IdentityOAuth2Exception) {
+                oAuth2Util.when(() -> OAuth2Util.authenticateClient(anyString(), anyString(), anyString())).thenThrow(
+                        (IdentityOAuth2Exception) exception);
+            }
+
+            when(httpServletRequest.getHeader(headerName)).thenReturn(headerValue);
+            basicAuthClientAuthenticator.authenticateClient(httpServletRequest, bodyContent, oAuthClientAuthnContext);
         }
-
-        when(httpServletRequest.getHeader(headerName)).thenReturn(headerValue);
-        basicAuthClientAuthenticator.authenticateClient(httpServletRequest, bodyContent, oAuthClientAuthnContext);
     }
 
     @DataProvider(name = "testCanAuthenticateData")
@@ -208,7 +215,7 @@ public class BasicAuthClientAuthenticatorTest extends PowerMockIdentityBaseTest 
     public void testCanAuthenticate(String headerName, String headerValue, HashMap<String, List> bodyContent, boolean
             canHandle) throws Exception {
 
-        HttpServletRequest httpServletRequest = PowerMockito.mock(HttpServletRequest.class);
+        HttpServletRequest httpServletRequest = mock(HttpServletRequest.class);
         when(httpServletRequest.getHeader(headerName)).thenReturn(headerValue);
         assertEquals(basicAuthClientAuthenticator.canAuthenticate(httpServletRequest, bodyContent, new
                 OAuthClientAuthnContext()), canHandle, "Expected can authenticate evaluation not received");
@@ -248,7 +255,7 @@ public class BasicAuthClientAuthenticatorTest extends PowerMockIdentityBaseTest 
     public void testGetClientId(String headerName, String headerValue, HashMap<String, List> bodyContent, String
             clientId) throws Exception {
 
-        HttpServletRequest httpServletRequest = PowerMockito.mock(HttpServletRequest.class);
+        HttpServletRequest httpServletRequest = mock(HttpServletRequest.class);
         when(httpServletRequest.getHeader(headerName)).thenReturn(headerValue);
         assertEquals(basicAuthClientAuthenticator.getClientId(httpServletRequest, bodyContent, new
                 OAuthClientAuthnContext()), clientId);
@@ -279,10 +286,23 @@ public class BasicAuthClientAuthenticatorTest extends PowerMockIdentityBaseTest 
     public void testGetClientIdErrorScenario(String headerName, String headerValue, HashMap<String, List> bodyContent)
             throws Exception {
 
-        HttpServletRequest httpServletRequest = PowerMockito.mock(HttpServletRequest.class);
+        HttpServletRequest httpServletRequest = mock(HttpServletRequest.class);
         when(httpServletRequest.getHeader(headerName)).thenReturn(headerValue);
         basicAuthClientAuthenticator.getClientId(httpServletRequest, bodyContent, new
                 OAuthClientAuthnContext());
+    }
+
+    @Test
+    public void testGetSupportedClientAuthenticationMethods() {
+
+        List<String> supportedAuthMethods = new ArrayList<>();
+        for (ClientAuthenticationMethodModel clientAuthenticationMethodModel : basicAuthClientAuthenticator
+                .getSupportedClientAuthenticationMethods()) {
+            supportedAuthMethods.add(clientAuthenticationMethodModel.getName());
+        }
+        Assert.assertTrue(supportedAuthMethods.contains("client_secret_basic"));
+        Assert.assertTrue(supportedAuthMethods.contains("client_secret_post"));
+        assertEquals(supportedAuthMethods.size(), 2);
     }
 
     private OAuthClientAuthnContext buildOAuthClientAuthnContext(String clientId, String clientSecret) {

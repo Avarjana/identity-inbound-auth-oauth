@@ -19,20 +19,21 @@
 package org.wso2.carbon.identity.oauth2.dcr.endpoint.impl;
 
 import org.mockito.Mock;
+import org.mockito.MockedConstruction;
+import org.mockito.MockedStatic;
+import org.mockito.testng.MockitoTestNGListener;
 import org.osgi.framework.BundleContext;
 import org.osgi.util.tracker.ServiceTracker;
-import org.powermock.core.classloader.annotations.PowerMockIgnore;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.testng.PowerMockTestCase;
+import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
+import org.testng.annotations.Listeners;
 import org.testng.annotations.Test;
 import org.wso2.carbon.base.MultitenantConstants;
 import org.wso2.carbon.context.PrivilegedCarbonContext;
 import org.wso2.carbon.context.internal.OSGiDataHolder;
 import org.wso2.carbon.identity.application.common.IdentityApplicationManagementException;
-import org.wso2.carbon.identity.application.common.model.ServiceProvider;
 import org.wso2.carbon.identity.application.mgt.ApplicationManagementService;
-import org.wso2.carbon.identity.oauth.OAuthAdminService;
+import org.wso2.carbon.identity.common.testng.WithCarbonHome;
 import org.wso2.carbon.identity.oauth.dcr.exception.DCRMException;
 import org.wso2.carbon.identity.oauth.dcr.internal.DCRDataHolder;
 import org.wso2.carbon.identity.oauth.dcr.service.DCRMService;
@@ -40,23 +41,23 @@ import org.wso2.carbon.identity.oauth2.dcr.endpoint.TestUtil;
 import org.wso2.carbon.identity.oauth2.dcr.endpoint.dto.RegistrationRequestDTO;
 import org.wso2.carbon.identity.oauth2.dcr.endpoint.dto.UpdateRequestDTO;
 import org.wso2.carbon.identity.oauth2.dcr.endpoint.exceptions.DCRMEndpointException;
-import org.wso2.carbon.identity.oauth2.dcr.endpoint.util.DCRMUtils;
 
 import java.util.ArrayList;
 import java.util.List;
 
 import javax.ws.rs.core.Response;
 
-import static org.mockito.Matchers.any;
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
-import static org.powermock.api.mockito.PowerMockito.when;
-import static org.powermock.api.mockito.PowerMockito.whenNew;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockConstruction;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 import static org.testng.Assert.assertEquals;
 
-@PrepareForTest({BundleContext.class, ServiceTracker.class, PrivilegedCarbonContext.class, DCRDataHolder.class,
-        ApplicationManagementService.class, ServiceProvider.class, OAuthAdminService.class})
-@PowerMockIgnore({"jdk.xml.*", "java.xml.*", "javax.xml.*", "org.w3c.dom.*", "org.xml.sax.*"})
-public class RegisterApiServiceImplExceptionTest extends PowerMockTestCase {
+@WithCarbonHome
+@Listeners(MockitoTestNGListener.class)
+public class RegisterApiServiceImplExceptionTest {
 
     private RegisterApiServiceImpl registerApiService = null;
     private DCRMService dcrmService = new DCRMService();
@@ -65,43 +66,55 @@ public class RegisterApiServiceImplExceptionTest extends PowerMockTestCase {
     BundleContext bundleContext;
 
     @Mock
-    ServiceTracker serviceTracker;
-
-    @Mock
     DCRDataHolder dataHolder;
 
     @Mock
     ApplicationManagementService applicationManagementService;
 
     @Mock
-    ServiceProvider serviceProvider;
+    PrivilegedCarbonContext privilegedCarbonContext;
 
-    @Mock
-    OAuthAdminService oAuthAdminService;
-
-    @Mock
-    DCRMService mockedDCRMService;
+    MockedConstruction<ServiceTracker> mockedConstruction;
+    private MockedStatic<PrivilegedCarbonContext> mockedPrivilegedCarbonContext;
 
     @BeforeMethod
     public void setUp() throws Exception {
+
+        if (mockedPrivilegedCarbonContext != null) {
+            mockedPrivilegedCarbonContext.close();
+        }
+        mockedPrivilegedCarbonContext = mockStatic(PrivilegedCarbonContext.class);
+        when(PrivilegedCarbonContext.getThreadLocalCarbonContext()).thenReturn(privilegedCarbonContext);
+        lenient().when(PrivilegedCarbonContext.getThreadLocalCarbonContext()
+                .getOSGiService(DCRMService.class, null)).thenReturn(mock(DCRMService.class));
 
         // Initializing variables.
         registerApiService = new RegisterApiServiceImpl();
 
         //Get OSGIservice by starting the tenant flow.
-        whenNew(ServiceTracker.class).withAnyArguments().thenReturn(serviceTracker);
         TestUtil.startTenantFlow(MultitenantConstants.SUPER_TENANT_DOMAIN_NAME);
         Object[] services = new Object[1];
         services[0] = dcrmService;
-        when(serviceTracker.getServices()).thenReturn(services);
+
+        mockedConstruction = mockConstruction(ServiceTracker.class,
+                (mock, context) -> {
+                    when(mock.getServices()).thenReturn(services);
+                });
+
         OSGiDataHolder.getInstance().setBundleContext(bundleContext);
+    }
+
+    @AfterMethod
+    public void tearDown() {
+
+        mockedConstruction.close();
+        PrivilegedCarbonContext.endTenantFlow();
     }
 
     @Test
     public void testDeleteApplicationClientException() throws Exception {
 
         try {
-            DCRMUtils.setOAuth2DCRMService(mockedDCRMService);
             registerApiService.deleteApplication("");
         } catch (DCRMEndpointException e) {
             assertEquals(e.getResponse().getStatus(), Response.Status.BAD_REQUEST.getStatusCode());
@@ -123,7 +136,6 @@ public class RegisterApiServiceImplExceptionTest extends PowerMockTestCase {
     public void testGetApplicationClientException() throws Exception {
 
         try {
-            DCRMUtils.setOAuth2DCRMService(mockedDCRMService);
             registerApiService.getApplication("");
         } catch (DCRMEndpointException e) {
             assertEquals(e.getResponse().getStatus(), Response.Status.BAD_REQUEST.getStatusCode());
@@ -143,49 +155,49 @@ public class RegisterApiServiceImplExceptionTest extends PowerMockTestCase {
     @Test
     public void testRegisterApplicationClientException() throws DCRMException {
 
-        List<String> granttypes = new ArrayList<>();
-        granttypes.add("code");
-        List<String> redirectUris = new ArrayList<>();
-        redirectUris.add("https://op.certification.openid.net:60845/authz_cb");
-        RegistrationRequestDTO registrationRequestDTO = new RegistrationRequestDTO();
-        registrationRequestDTO.setClientName("Test App");
-        registrationRequestDTO.setGrantTypes(granttypes);
-        registrationRequestDTO.setRedirectUris(redirectUris);
-        mockStatic(DCRDataHolder.class);
-        DCRMUtils.setOAuth2DCRMService(mockedDCRMService);
-        when(DCRDataHolder.getInstance()).thenReturn(dataHolder);
-        when(dataHolder.getApplicationManagementService()).thenReturn(applicationManagementService);
+        try (MockedStatic<DCRDataHolder> dcrDataHolder = mockStatic(DCRDataHolder.class)) {
+            List<String> granttypes = new ArrayList<>();
+            granttypes.add("code");
+            List<String> redirectUris = new ArrayList<>();
+            redirectUris.add("https://op.certification.openid.net:60845/authz_cb");
+            RegistrationRequestDTO registrationRequestDTO = new RegistrationRequestDTO();
+            registrationRequestDTO.setClientName("Test App");
+            registrationRequestDTO.setGrantTypes(granttypes);
+            registrationRequestDTO.setRedirectUris(redirectUris);
+            dcrDataHolder.when(DCRDataHolder::getInstance).thenReturn(dataHolder);
+            lenient().when(dataHolder.getApplicationManagementService()).thenReturn(applicationManagementService);
 
-        try {
-            registerApiService.registerApplication(registrationRequestDTO);
-        } catch (DCRMEndpointException e) {
-            assertEquals(e.getResponse().getStatus(), Response.Status.BAD_REQUEST.getStatusCode());
+            try {
+                registerApiService.registerApplication(registrationRequestDTO);
+            } catch (DCRMEndpointException e) {
+                assertEquals(e.getResponse().getStatus(), Response.Status.BAD_REQUEST.getStatusCode());
+            }
         }
     }
 
     @Test
     public void testRegisterApplicationServerException() throws DCRMException, IdentityApplicationManagementException {
 
-        List<String> granttypes = new ArrayList<>();
-        granttypes.add("code");
-        List<String> redirectUris = new ArrayList<>();
-        redirectUris.add("https://op.certification.openid.net:60845/authz_cb");
-        RegistrationRequestDTO registrationRequestDTO = new RegistrationRequestDTO();
-        registrationRequestDTO.setClientName("Test App");
-        registrationRequestDTO.setGrantTypes(granttypes);
-        registrationRequestDTO.setRedirectUris(redirectUris);
+        try (MockedStatic<DCRDataHolder> dcrDataHolder = mockStatic(DCRDataHolder.class)) {
+            List<String> granttypes = new ArrayList<>();
+            granttypes.add("code");
+            List<String> redirectUris = new ArrayList<>();
+            redirectUris.add("https://op.certification.openid.net:60845/authz_cb");
+            RegistrationRequestDTO registrationRequestDTO = new RegistrationRequestDTO();
+            registrationRequestDTO.setClientName("Test App");
+            registrationRequestDTO.setGrantTypes(granttypes);
+            registrationRequestDTO.setRedirectUris(redirectUris);
 
-        mockStatic(DCRDataHolder.class);
-        DCRMUtils.setOAuth2DCRMService(mockedDCRMService);
-        when(DCRDataHolder.getInstance()).thenReturn(dataHolder);
-        when(dataHolder.getApplicationManagementService()).thenReturn(applicationManagementService);
-        when(applicationManagementService.getServiceProvider(any(String.class), any(String.class))).
-                thenThrow(new IdentityApplicationManagementException("execption"));
+            dcrDataHolder.when(DCRDataHolder::getInstance).thenReturn(dataHolder);
+            lenient().when(dataHolder.getApplicationManagementService()).thenReturn(applicationManagementService);
+            lenient().when(applicationManagementService.getServiceProvider(any(String.class), any(String.class))).
+                    thenThrow(new IdentityApplicationManagementException("execption"));
 
-        try {
-            registerApiService.registerApplication(registrationRequestDTO);
-        } catch (DCRMEndpointException e) {
-            assertEquals(e.getResponse().getStatus(), Response.Status.BAD_REQUEST.getStatusCode());
+            try {
+                registerApiService.registerApplication(registrationRequestDTO);
+            } catch (DCRMEndpointException e) {
+                assertEquals(e.getResponse().getStatus(), Response.Status.BAD_REQUEST.getStatusCode());
+            }
         }
     }
 
@@ -204,24 +216,24 @@ public class RegisterApiServiceImplExceptionTest extends PowerMockTestCase {
     @Test
     public void testUpdateApplicationClientException() throws DCRMException {
 
-        List<String> granttypes = new ArrayList<>();
-        granttypes.add("code");
-        List<String> redirectUris = new ArrayList<>();
-        redirectUris.add("https://op.certification.openid.net:60845/authz_cb");
-        UpdateRequestDTO updateRequestDTO = new UpdateRequestDTO();
-        updateRequestDTO.setClientName("Test App");
-        updateRequestDTO.setGrantTypes(granttypes);
-        updateRequestDTO.setRedirectUris(redirectUris);
-        mockStatic(DCRDataHolder.class);
-        DCRMUtils.setOAuth2DCRMService(mockedDCRMService);
-        when(DCRDataHolder.getInstance()).thenReturn(dataHolder);
-        when(dataHolder.getApplicationManagementService()).thenReturn(applicationManagementService);
+        try (MockedStatic<DCRDataHolder> dcrDataHolder = mockStatic(DCRDataHolder.class)) {
+            List<String> granttypes = new ArrayList<>();
+            granttypes.add("code");
+            List<String> redirectUris = new ArrayList<>();
+            redirectUris.add("https://op.certification.openid.net:60845/authz_cb");
+            UpdateRequestDTO updateRequestDTO = new UpdateRequestDTO();
+            updateRequestDTO.setClientName("Test App");
+            updateRequestDTO.setGrantTypes(granttypes);
+            updateRequestDTO.setRedirectUris(redirectUris);
+            dcrDataHolder.when(DCRDataHolder::getInstance).thenReturn(dataHolder);
+            lenient().when(dataHolder.getApplicationManagementService()).thenReturn(applicationManagementService);
 
-        // Test when clientID is null.
-        try {
-            registerApiService.updateApplication(updateRequestDTO, "");
-        } catch (DCRMEndpointException e) {
-            assertEquals(e.getResponse().getStatus(), Response.Status.BAD_REQUEST.getStatusCode());
+            // Test when clientID is null.
+            try {
+                registerApiService.updateApplication(updateRequestDTO, "");
+            } catch (DCRMEndpointException e) {
+                assertEquals(e.getResponse().getStatus(), Response.Status.BAD_REQUEST.getStatusCode());
+            }
         }
     }
 

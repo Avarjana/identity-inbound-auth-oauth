@@ -44,16 +44,24 @@ public class DCRMConstants {
         BAD_REQUEST_INVALID_SP_NAME("Client Name is not adhering to the regex: %s"),
         BAD_REQUEST_INVALID_SP_TEMPLATE_NAME("Invalid service provider template name: %s"),
         BAD_REQUEST_INVALID_INPUT("%s"),
+        BAD_REQUEST_INVALID_SP_INPUT("Invalid data sent for the service provider : %s"),
         BAD_REQUEST_INSUFFICIENT_DATA("Insufficient data in the request"),
         NOT_FOUND_APPLICATION_WITH_ID("Application not available for given client key: %s"),
         NOT_FOUND_APPLICATION_WITH_NAME("Application not available for given client name: %s"),
+        NOT_FOUND_OAUTH_APPLICATION_WITH_NAME("OAuth application not available for given client name: %s"),
         CONFLICT_EXISTING_CLIENT_ID("Client id %s already exist in the system"),
         BAD_REQUEST_CLIENT_ID_VIOLATES_PATTERN("Provided client id is not adhering to the provided regex %s"),
         FORBIDDEN_UNAUTHORIZED_USER("User does not have access to the application %s"),
         ERROR_CODE_UNEXPECTED("Unexpected error"),
         TENANT_DOMAIN_MISMATCH("NOT_FOUND_60001", "Tenant domain in request does not match with the application " +
                 "tenant domain for consumer key: %s"),
-        FAILED_TO_VALIDATE_TENANT_DOMAIN("Error occurred during validating tenant domain for consumer key: %s");
+        FAILED_TO_VALIDATE_TENANT_DOMAIN("Error occurred during validating tenant domain for consumer key: %s"),
+        FAILED_TO_GET_TENANT_ADMIN("Error occurred during white getting tenant admin."),
+        SIGNATURE_VALIDATION_FAILED("Signature validation failed for the software statement"),
+        MANDATORY_SOFTWARE_STATEMENT("Mandatory software statement is missing"),
+        FAILED_TO_READ_SSA("Error occurred while reading the software statement"),
+        ADDITIONAL_ATTRIBUTE_ERROR("Error occurred while handling additional attributes"),
+        FAILED_TO_RESOLVE_TENANT_DOMAIN("Error while resolving tenant domain from the organization id: %s");
 
         private final String message;
         private final String errorCode;
@@ -93,4 +101,96 @@ public class DCRMConstants {
     }
 
     public static final String OAUTH2 = "oauth2";
+    public static final String DCR_CONFIG_RESOURCE_TYPE_NAME = "DCR_CONFIGURATION";
+    public static final String DCR_CONFIG_RESOURCE_NAME = "TENANT_DCR_CONFIGURATION";
+    public static final String ENABLE_FAPI_ENFORCEMENT = "enableFapiEnforcement";
+    public static final String CLIENT_AUTHENTICATION_REQUIRED = "clientAuthenticationRequired";
+    public static final String SSA_JWKS = "ssaJwks";
+    public static final String MANDATE_SSA = "mandateSSA";
+
+    /**
+     * Enum for DCR Configuration related error messages.
+     */
+    public enum DCRConfigErrorMessage {
+
+        /**
+         * Unable to retrieve DCR configuration.
+         */
+        ERROR_CODE_DCR_CONFIGURATION_RETRIEVE("65020",
+                "Unable to retrieve DCR configuration.",
+                "Server encountered an error while retrieving the DCR configuration of %s."),
+
+        /**
+         * SSA JWKS not found.
+         */
+        ERROR_CODE_SSA_JWKS_REQUIRED("65021",
+                "SSA JWKS not found.",
+                "SSA JWKS url is required to mandate SSA validation."),
+
+        /**
+         * SSA not Mandated Error.
+         */
+        ERROR_CODE_SSA_NOT_MANDATED("65022",
+                                             "SSA not mandated.",
+                                             "Authentication is disabled but mandateSSA is not set to True.");
+
+        /**
+         * The error code.
+         */
+        private final String code;
+
+        /**
+         * The error message.
+         */
+        private final String message;
+
+        /**
+         * The error description.
+         */
+        private final String description;
+
+
+        DCRConfigErrorMessage(String code, String message, String description) {
+
+            this.code = code;
+            this.message = message;
+            this.description = description;
+        }
+
+        /**
+         * Get the {@code code}.
+         *
+         * @return Returns the {@code code} to be set.
+         */
+        public String getCode() {
+
+            return code;
+        }
+
+        /**
+         * Get the {@code message}.
+         *
+         * @return Returns the {@code message} to be set.
+         */
+        public String getMessage() {
+
+            return message;
+        }
+
+        /**
+         * Get the {@code description}.
+         *
+         * @return Returns the {@code description} to be set.
+         */
+        public String getDescription() {
+
+            return description;
+        }
+
+        @Override
+        public String toString() {
+
+            return code + ":" + message;
+        }
+    }
 }

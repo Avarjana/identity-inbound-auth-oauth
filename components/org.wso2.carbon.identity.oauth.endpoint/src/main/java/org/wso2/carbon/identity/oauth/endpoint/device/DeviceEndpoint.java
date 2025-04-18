@@ -17,6 +17,7 @@
  */
 package org.wso2.carbon.identity.oauth.endpoint.device;
 
+import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.cxf.interceptor.InInterceptors;
@@ -31,11 +32,12 @@ import org.wso2.carbon.identity.oauth.client.authn.filter.OAuthClientAuthenticat
 import org.wso2.carbon.identity.oauth.common.OAuth2ErrorCodes;
 import org.wso2.carbon.identity.oauth.common.OAuthConstants;
 import org.wso2.carbon.identity.oauth.config.OAuthServerConfiguration;
+import org.wso2.carbon.identity.oauth.endpoint.OAuthRequestWrapper;
 import org.wso2.carbon.identity.oauth.endpoint.exception.TokenEndpointBadRequestException;
 import org.wso2.carbon.identity.oauth.endpoint.util.EndpointUtil;
+import org.wso2.carbon.identity.oauth.endpoint.util.factory.DeviceServiceFactory;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
 import org.wso2.carbon.identity.oauth2.bean.OAuthClientAuthnContext;
-import org.wso2.carbon.identity.oauth2.device.api.DeviceAuthService;
 import org.wso2.carbon.identity.oauth2.device.codegenerator.GenerateKeys;
 import org.wso2.carbon.identity.oauth2.device.constants.Constants;
 import org.wso2.carbon.identity.oauth2.device.util.DeviceFlowUtil;
@@ -59,12 +61,6 @@ import javax.ws.rs.core.Response;
 @InInterceptors(classes = OAuthClientAuthenticatorProxy.class)
 public class DeviceEndpoint {
     private static final Log log = LogFactory.getLog(DeviceEndpoint.class);
-    private DeviceAuthService deviceAuthService;
-
-    public void setDeviceAuthService(DeviceAuthService deviceAuthService) {
-
-        this.deviceAuthService = deviceAuthService;
-    }
 
     @POST
     @Path("/")
@@ -79,6 +75,9 @@ public class DeviceEndpoint {
         if (!oAuthClientAuthnContext.isAuthenticated()) {
             return handleErrorResponse(oAuthClientAuthnContext);
         }
+
+        // Wrap the request to avoid missing of request attributes.
+        request = new OAuthRequestWrapper(request, paramMap);
 
         try {
             validateRepeatedParams(request, paramMap);
@@ -103,7 +102,8 @@ public class DeviceEndpoint {
 
         String temporaryUserCode = GenerateKeys.getKey(OAuthServerConfiguration.getInstance().getDeviceCodeKeyLength());
         long quantifier = GenerateKeys.getCurrentQuantifier();
-        return deviceAuthService.generateDeviceResponse(deviceCode, temporaryUserCode, quantifier, clientId, scopes);
+        return DeviceServiceFactory.getDeviceAuthService().generateDeviceResponse(deviceCode, temporaryUserCode,
+                quantifier, clientId, scopes);
     }
 
     private void validateRepeatedParams(HttpServletRequest request, MultivaluedMap<String, String> paramMap)
@@ -200,24 +200,19 @@ public class DeviceEndpoint {
                     .setError(OAuth2ErrorCodes.INVALID_CLIENT)
                     .setErrorDescription("Client Authentication failed").buildJSONMessage();
         } else {
-            response = OAuthASResponse.errorResponse(HttpServletResponse.SC_UNAUTHORIZED)
-                    .setError(OAuth2ErrorCodes.INVALID_REQUEST)
-                    .setErrorDescription("Missing parameters: client_id").buildJSONMessage();
+            if (StringUtils.isNotBlank(oAuthClientAuthnContext.getErrorMessage())) {
+                response = OAuthASResponse.errorResponse(HttpServletResponse.SC_UNAUTHORIZED)
+                        .setError(OAuth2ErrorCodes.INVALID_REQUEST)
+                        .setErrorDescription(oAuthClientAuthnContext.getErrorMessage()).buildJSONMessage();
+            } else {
+                response = OAuthASResponse.errorResponse(HttpServletResponse.SC_UNAUTHORIZED)
+                        .setError(OAuth2ErrorCodes.INVALID_REQUEST)
+                        .setErrorDescription("Missing parameters: client_id").buildJSONMessage();
+            }
         }
         return Response.status(response.getResponseStatus())
                 .header(OAuthConstants.HTTP_RESP_HEADER_AUTHENTICATE, EndpointUtil.getRealmInfo())
                 .entity(response.getBody()).build();
-    }
-
-    /**
-     * This method converts time in milliseconds to seconds.
-     *
-     * @param value Time in milliseconds.
-     * @return String value of time in seconds.
-     */
-    private String stringValueInSeconds(long value) {
-
-        return String.valueOf(value / 1000);
     }
 
     /**

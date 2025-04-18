@@ -1,7 +1,7 @@
 /*
- * Copyright (c) 2017, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
+ * Copyright (c) 2017-2025, WSO2 LLC. (http://www.wso2.com).
  *
- * WSO2 Inc. licenses this file to you under the Apache License,
+ * WSO2 LLC. licenses this file to you under the Apache License,
  * Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License.
  * You may obtain a copy of the License at
@@ -35,6 +35,8 @@ import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.oltu.oauth2.common.exception.OAuthSystemException;
+import org.wso2.carbon.context.PrivilegedCarbonContext;
+import org.wso2.carbon.identity.application.authentication.framework.exception.UserIdNotFoundException;
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
 import org.wso2.carbon.identity.base.IdentityConstants;
 import org.wso2.carbon.identity.core.util.IdentityTenantUtil;
@@ -44,6 +46,7 @@ import org.wso2.carbon.identity.oauth.common.exception.InvalidOAuthClientExcepti
 import org.wso2.carbon.identity.oauth.config.OAuthServerConfiguration;
 import org.wso2.carbon.identity.oauth.dao.OAuthAppDO;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
+import org.wso2.carbon.identity.oauth2.OAuth2Constants;
 import org.wso2.carbon.identity.oauth2.authz.OAuthAuthzReqMessageContext;
 import org.wso2.carbon.identity.oauth2.internal.OAuth2ServiceComponentHolder;
 import org.wso2.carbon.identity.oauth2.token.bindings.TokenBinding;
@@ -51,19 +54,24 @@ import org.wso2.carbon.identity.oauth2.token.handlers.claims.JWTAccessTokenClaim
 import org.wso2.carbon.identity.oauth2.token.handlers.grant.AuthorizationGrantHandler;
 import org.wso2.carbon.identity.oauth2.util.OAuth2Util;
 import org.wso2.carbon.identity.openidconnect.CustomClaimsCallbackHandler;
-import org.wso2.carbon.registry.core.utils.UUIDGenerator;
+import org.wso2.carbon.identity.openidconnect.OIDCClaimUtil;
+import org.wso2.carbon.identity.openidconnect.util.ClaimHandlerUtil;
+import org.wso2.carbon.identity.organization.management.service.exception.OrganizationManagementException;
 
 import java.security.Key;
+import java.security.cert.Certificate;
 import java.security.interfaces.RSAPrivateKey;
 import java.text.ParseException;
 import java.util.Arrays;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.wso2.carbon.identity.oauth.common.OAuthConstants.OIDCConfigProperties.SUBJECT_TOKEN_EXPIRY_TIME_VALUE;
 import static org.wso2.carbon.identity.oauth.common.OAuthConstants.RENEW_TOKEN_WITHOUT_REVOKING_EXISTING_ENABLE_CONFIG;
 import static org.wso2.carbon.identity.oauth.common.OAuthConstants.REQUEST_BINDING_TYPE;
 import static org.wso2.carbon.identity.oauth2.util.OAuth2Util.getPrivateKey;
@@ -94,10 +102,13 @@ public class JWTTokenIssuer extends OauthTokenIssuerImpl {
     private static final String TOKEN_BINDING_TYPE = "binding_type";
     private static final String DEFAULT_TYP_HEADER_VALUE = "at+jwt";
     private static final String CNF = "cnf";
-
     private static final Log log = LogFactory.getLog(JWTTokenIssuer.class);
     private static final String INBOUND_AUTH2_TYPE = "oauth2";
     private Algorithm signatureAlgorithm = null;
+    private static final String ENABLE_PPID_FOR_ACCESS_TOKENS = "OAuth.OpenIDConnect.EnablePairwiseSubForAccessToken";
+    private static final String JWT_TYP_HEADER_VALUE = "jwt";
+    private static final String MAY_ACT = "may_act";
+    private static final String SUB = "sub";
 
     public JWTTokenIssuer() throws IdentityOAuth2Exception {
 
@@ -109,6 +120,98 @@ public class JWTTokenIssuer extends OauthTokenIssuerImpl {
 
         // Map signature algorithm from identity.xml to nimbus format, this is a one time configuration.
         signatureAlgorithm = mapSignatureAlgorithm(config.getSignatureAlgorithm());
+    }
+
+    @Override
+    public String getAccessTokenType() {
+
+        return JWT_TYP_HEADER_VALUE;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public String issueSubjectToken(OAuthAuthzReqMessageContext oauthAuthzMsgCtx) throws IdentityOAuth2Exception {
+
+        if (log.isDebugEnabled()) {
+            log.debug("Subject token request with authorization request message context message context. " +
+                    "Authorized user " + oauthAuthzMsgCtx.getAuthorizationReqDTO().getUser().getLoggableUserId());
+        }
+
+        return this.buildSubjectJWTToken(oauthAuthzMsgCtx);
+    }
+
+    private String buildSubjectJWTToken(OAuthAuthzReqMessageContext oauthAuthzMsgCtx) throws IdentityOAuth2Exception {
+
+        JWTClaimsSet jwtClaimsSet = createSubjectTokenJWTClaimSet(oauthAuthzMsgCtx);
+        JWTClaimsSet.Builder jwtClaimsSetBuilder = new JWTClaimsSet.Builder(jwtClaimsSet);
+        jwtClaimsSet = jwtClaimsSetBuilder.build();
+
+        if (JWSAlgorithm.NONE.getName().equals(signatureAlgorithm.getName())) {
+            return new PlainJWT(jwtClaimsSet).serialize();
+        }
+        return signJWT(jwtClaimsSet, null, oauthAuthzMsgCtx);
+    }
+
+    private JWTClaimsSet createSubjectTokenJWTClaimSet(OAuthAuthzReqMessageContext oauthAuthzMsgCtx)
+            throws IdentityOAuth2Exception {
+
+        String consumerKey = oauthAuthzMsgCtx.getAuthorizationReqDTO().getConsumerKey();
+        // loading the stored application data
+        OAuthAppDO oAuthAppDO;
+        try {
+            oAuthAppDO = OAuth2Util.getAppInformationByClientId(consumerKey);
+        } catch (InvalidOAuthClientException e) {
+            throw new IdentityOAuth2Exception("Error while retrieving app information for clientId: " + consumerKey, e);
+        }
+
+        String spTenantDomain = oauthAuthzMsgCtx.getAuthorizationReqDTO().getTenantDomain();
+        if (oAuthAppDO.getSubjectTokenExpiryTime() <= 0) {
+            oAuthAppDO.setSubjectTokenExpiryTime(SUBJECT_TOKEN_EXPIRY_TIME_VALUE);
+        }
+        int subjectTokenLifeTimeInSec = oAuthAppDO.getSubjectTokenExpiryTime() * 1000;;
+
+        String issuer = OAuth2Util.getIdTokenIssuer(spTenantDomain);
+        long curTimeInMillis = Calendar.getInstance().getTimeInMillis();
+
+        AuthenticatedUser authenticatedUser = getAuthenticatedUser(oauthAuthzMsgCtx, null);
+        String sub = authenticatedUser.getAuthenticatedSubjectIdentifier();
+
+        String subject = oauthAuthzMsgCtx.getAuthorizationReqDTO().getRequestedSubjectId();
+
+        // Set the default claims.
+        JWTClaimsSet.Builder jwtClaimsSetBuilder = new JWTClaimsSet.Builder();
+        jwtClaimsSetBuilder.issuer(issuer);
+        jwtClaimsSetBuilder.subject(subject);
+        String scope = getScope(oauthAuthzMsgCtx, null);
+        if (StringUtils.isNotEmpty(scope)) {
+            jwtClaimsSetBuilder.claim(SCOPE, scope);
+        }
+
+        jwtClaimsSetBuilder.claim(AUTHORIZATION_PARTY, consumerKey);
+        jwtClaimsSetBuilder.issueTime(new Date(curTimeInMillis));
+        jwtClaimsSetBuilder.jwtID(UUID.randomUUID().toString());
+        jwtClaimsSetBuilder.notBeforeTime(new Date(curTimeInMillis));
+        jwtClaimsSetBuilder.claim(CLIENT_ID, consumerKey);
+
+        jwtClaimsSetBuilder.claim(MAY_ACT, Collections.singletonMap(SUB, sub));
+        jwtClaimsSetBuilder.expirationTime(calculateSubjectTokenExpiryTime(subjectTokenLifeTimeInSec,
+                curTimeInMillis));
+        List<String> audience = OAuth2Util.getOIDCAudience(consumerKey, oAuthAppDO);
+        jwtClaimsSetBuilder.audience(audience);
+
+        return jwtClaimsSetBuilder.build();
+    }
+
+    private Date calculateSubjectTokenExpiryTime(long subjectTokenLifeTimeInMillis, long curTimeInMillis) {
+
+        Date expirationTime =  new Date(curTimeInMillis + subjectTokenLifeTimeInMillis);
+
+        if (log.isDebugEnabled()) {
+            log.debug("Subject token expiry time : " + expirationTime + "ms.");
+        }
+        return expirationTime;
     }
 
     @Override
@@ -150,8 +253,12 @@ public class JWTTokenIssuer extends OauthTokenIssuerImpl {
 
         try {
             JWT parsedJwtToken = JWTParser.parse(accessToken);
+            // JWT ClaimsSet can be null if the ID token is encrypted.
+            if (parsedJwtToken.getJWTClaimsSet() == null) {
+                throw new OAuthSystemException("JWT claims set is null in the JWT token.");
+            }
             String jwtId = parsedJwtToken.getJWTClaimsSet().getJWTID();
-            if (jwtId == null) {
+            if (StringUtils.isBlank(jwtId)) {
                 throw new OAuthSystemException("JTI could not be retrieved from the JWT token.");
             }
             return jwtId;
@@ -195,6 +302,7 @@ public class JWTTokenIssuer extends OauthTokenIssuerImpl {
         }
 
         jwtClaimsSet = jwtClaimsSetBuilder.build();
+
         if (JWSAlgorithm.NONE.getName().equals(signatureAlgorithm.getName())) {
             return new PlainJWT(jwtClaimsSet).serialize();
         }
@@ -312,7 +420,16 @@ public class JWTTokenIssuer extends OauthTokenIssuerImpl {
             throws IdentityOAuth2Exception {
 
         String tenantDomain;
-        if (OAuthServerConfiguration.getInstance().getUseSPTenantDomainValue()) {
+        String applicationResidentOrgId = PrivilegedCarbonContext.getThreadLocalCarbonContext()
+                .getApplicationResidentOrganizationId();
+        /*
+         If applicationResidentOrgId is not empty, then the request comes for an application which is registered
+         directly in the organization of the applicationResidentOrgId. In this scenario, the signing tenant domain
+         should be the root tenant domain of the applicationResidentOrgId.
+        */
+        if (StringUtils.isNotEmpty(applicationResidentOrgId)) {
+            tenantDomain = PrivilegedCarbonContext.getThreadLocalCarbonContext().getTenantDomain();
+        } else if (OAuthServerConfiguration.getInstance().getUseSPTenantDomainValue()) {
             if (log.isDebugEnabled()) {
                 log.debug("Using the tenant domain of the SP to sign the token");
             }
@@ -367,11 +484,17 @@ public class JWTTokenIssuer extends OauthTokenIssuerImpl {
             Key privateKey = getPrivateKey(tenantDomain, tenantId);
             JWSSigner signer = OAuth2Util.createJWSSigner((RSAPrivateKey) privateKey);
             JWSHeader.Builder headerBuilder = new JWSHeader.Builder((JWSAlgorithm) signatureAlgorithm);
-            String certThumbPrint = OAuth2Util.getThumbPrint(tenantDomain, tenantId);
+            Certificate certificate = OAuth2Util.getCertificate(tenantDomain, tenantId);
+            String certThumbPrint = OAuth2Util.getThumbPrintWithPrevAlgorithm(certificate, false);
             headerBuilder.keyID(OAuth2Util.getKID(OAuth2Util.getCertificate(tenantDomain, tenantId),
                     (JWSAlgorithm) signatureAlgorithm, tenantDomain));
-            // Set the required "typ" header "at+jwt" for access tokens issued by the issuer
-            headerBuilder.type(new JOSEObjectType(DEFAULT_TYP_HEADER_VALUE));
+
+            if (authorizationContext != null && authorizationContext.isSubjectTokenFlow()) {
+                headerBuilder.type(new JOSEObjectType(JWT_TYP_HEADER_VALUE));
+            } else {
+                // Set the required "typ" header "at+jwt" for access tokens issued by the issuer
+                headerBuilder.type(new JOSEObjectType(DEFAULT_TYP_HEADER_VALUE));
+            }
             headerBuilder.x509CertThumbprint(new Base64URL(certThumbPrint));
             SignedJWT signedJWT = new SignedJWT(headerBuilder.build(), jwtClaimsSet);
             signedJWT.sign(signer);
@@ -454,8 +577,25 @@ public class JWTTokenIssuer extends OauthTokenIssuerImpl {
 
         // loading the stored application data
         OAuthAppDO oAuthAppDO;
+        String tenantDomain = PrivilegedCarbonContext.getThreadLocalCarbonContext().getTenantDomain();
+        String applicationResidentOrgId = PrivilegedCarbonContext.getThreadLocalCarbonContext()
+                .getApplicationResidentOrganizationId();
         try {
-            oAuthAppDO = OAuth2Util.getAppInformationByClientId(consumerKey);
+            /*
+             If applicationResidentOrgId is not empty, then the request comes for an application which is registered
+             directly in the organization of the applicationResidentOrgId. Therefore, the tenant domain should be
+             extracted from the organization id to get the information of the application.
+            */
+            if (StringUtils.isNotEmpty(applicationResidentOrgId)) {
+                try {
+                    tenantDomain = OAuth2ServiceComponentHolder.getInstance().getOrganizationManager()
+                            .resolveTenantDomain(applicationResidentOrgId);
+                } catch (OrganizationManagementException e) {
+                    throw new IdentityOAuth2Exception("Error while resolving tenant domain from the organization id: "
+                            + applicationResidentOrgId, e);
+                }
+            }
+            oAuthAppDO = OAuth2Util.getAppInformationByClientId(consumerKey, tenantDomain);
         } catch (InvalidOAuthClientException e) {
             throw new IdentityOAuth2Exception("Error while retrieving app information for clientId: " + consumerKey, e);
         }
@@ -472,11 +612,35 @@ public class JWTTokenIssuer extends OauthTokenIssuerImpl {
             spTenantDomain = tokenReqMessageContext.getOauth2AccessTokenReqDTO().getTenantDomain();
         }
 
-        String issuer = OAuth2Util.getIdTokenIssuer(spTenantDomain);
+        /*
+         If applicationResidentOrgId is not empty, then the request comes for an application which is registered
+         directly in the organization of the applicationResidentOrgId. spTenantDomain is used to get the idTokenIssuer
+         for the token. In this scenario, the tenant domain that needs to be used as the issuer is the root tenant.
+        */
+        if (StringUtils.isNotEmpty(applicationResidentOrgId)) {
+            spTenantDomain = PrivilegedCarbonContext.getThreadLocalCarbonContext().getTenantDomain();;
+        }
+
+        boolean isMTLSrequest;
+        if (authAuthzReqMessageContext != null) {
+            /* If the auth request is originated from a request object reference(ex: PAR), then that endpoint should be
+            considered when determining the audience and issuer claims. */
+            Object isMTLSProp = authAuthzReqMessageContext.getProperty(OAuthConstants.IS_MTLS_REQUEST);
+            isMTLSrequest = isMTLSProp != null && Boolean.parseBoolean(isMTLSProp.toString());
+        } else {
+            // For the token requests, the token gateway is considered when determining the issuer and the audience.
+            isMTLSrequest = OAuth2Util.isMtlsRequest(tokenReqMessageContext.getOauth2AccessTokenReqDTO()
+                    .getHttpServletRequestWrapper().getRequestURL().toString());
+        }
+        String issuer = OAuth2Util.getIdTokenIssuer(spTenantDomain, isMTLSrequest);
         long curTimeInMillis = Calendar.getInstance().getTimeInMillis();
 
         AuthenticatedUser authenticatedUser = getAuthenticatedUser(authAuthzReqMessageContext, tokenReqMessageContext);
-        String sub = getSubjectClaim(consumerKey, spTenantDomain, authenticatedUser);
+        String sub = authenticatedUser.getAuthenticatedSubjectIdentifier();
+        if (OAuth2Util.isPairwiseSubEnabledForAccessTokens()) {
+            // pairwise sub claim is returned only if pairwise subject identifier for access tokens is enabled.
+            sub = OIDCClaimUtil.getSubjectClaim(sub, oAuthAppDO);
+        }
 
         // Set the default claims.
         JWTClaimsSet.Builder jwtClaimsSetBuilder = new JWTClaimsSet.Builder();
@@ -487,7 +651,8 @@ public class JWTTokenIssuer extends OauthTokenIssuerImpl {
         jwtClaimsSetBuilder.jwtID(UUID.randomUUID().toString());
         jwtClaimsSetBuilder.notBeforeTime(new Date(curTimeInMillis));
         jwtClaimsSetBuilder.claim(CLIENT_ID, consumerKey);
-
+        setClaimsForNonPersistence(jwtClaimsSetBuilder, authAuthzReqMessageContext, tokenReqMessageContext,
+                authenticatedUser, oAuthAppDO);
         String scope = getScope(authAuthzReqMessageContext, tokenReqMessageContext);
         if (StringUtils.isNotEmpty(scope)) {
             jwtClaimsSetBuilder.claim(SCOPE, scope);
@@ -495,23 +660,24 @@ public class JWTTokenIssuer extends OauthTokenIssuerImpl {
 
         jwtClaimsSetBuilder.claim(OAuthConstants.AUTHORIZED_USER_TYPE,
                 getAuthorizedUserType(authAuthzReqMessageContext, tokenReqMessageContext));
-
         jwtClaimsSetBuilder.expirationTime(calculateAccessTokenExpiryTime(accessTokenLifeTimeInMillis,
                 curTimeInMillis));
 
-        // This is a spec (openid-connect-core-1_0:2.0) requirement for ID tokens. But we are keeping this in JWT
-        // as well.
-        List<String> audience = OAuth2Util.getOIDCAudience(consumerKey, oAuthAppDO);
-        jwtClaimsSetBuilder.audience(audience);
+        // This is a spec (openid-connect-core-1_0:2.0) requirement for ID tokens.
+        // But we are keeping this in JWT as well.
+        jwtClaimsSetBuilder.audience(tokenReqMessageContext != null && tokenReqMessageContext.getAudiences() != null ?
+                tokenReqMessageContext.getAudiences() : OAuth2Util.getOIDCAudience(consumerKey, oAuthAppDO));
+
         JWTClaimsSet jwtClaimsSet;
 
         // Handle custom claims
         if (authAuthzReqMessageContext != null) {
-            jwtClaimsSet = handleCustomClaims(jwtClaimsSetBuilder, authAuthzReqMessageContext);
+            jwtClaimsSet = handleCustomClaims(jwtClaimsSetBuilder, authAuthzReqMessageContext, oAuthAppDO);
         } else {
-            jwtClaimsSet = handleCustomClaims(jwtClaimsSetBuilder, tokenReqMessageContext);
+            jwtClaimsSet = handleCustomClaims(jwtClaimsSetBuilder, tokenReqMessageContext, oAuthAppDO);
         }
 
+        // todo: deprecate when pre issue access token action is ready
         if (tokenReqMessageContext != null && tokenReqMessageContext.getOauth2AccessTokenReqDTO() != null &&
                 tokenReqMessageContext.getOauth2AccessTokenReqDTO().getAccessTokenExtendedAttributes() != null) {
             Map<String, String> customClaims =
@@ -523,6 +689,7 @@ public class JWTTokenIssuer extends OauthTokenIssuerImpl {
                 }
             }
         }
+
         // Include token binding.
         jwtClaimsSet = handleTokenBinding(jwtClaimsSetBuilder, tokenReqMessageContext);
 
@@ -585,12 +752,6 @@ public class JWTTokenIssuer extends OauthTokenIssuerImpl {
 
         jwtClaimsSetBuilder.claim(CNF, tokReqMsgCtx.getProperty(CNF));
         return jwtClaimsSetBuilder.build();
-    }
-
-    private String getSubjectClaim(String clientId, String spTenantDomain, AuthenticatedUser authorizedUser)
-            throws IdentityOAuth2Exception {
-
-        return authorizedUser.getAuthenticatedSubjectIdentifier();
     }
 
     /**
@@ -684,9 +845,20 @@ public class JWTTokenIssuer extends OauthTokenIssuerImpl {
     protected long getAccessTokenLifeTimeInMillis(OAuthTokenReqMessageContext tokenReqMessageContext,
                                                   OAuthAppDO oAuthAppDO,
                                                   String consumerKey) throws IdentityOAuth2Exception {
+
         long lifetimeInMillis;
+
+        if (tokenReqMessageContext.isPreIssueAccessTokenActionsExecuted()) {
+            lifetimeInMillis = tokenReqMessageContext.getValidityPeriod();
+            log.debug("Access token life time is set from OAuthTokenReqMessageContext. Token Lifetime : " +
+                    lifetimeInMillis + "ms.");
+
+            return lifetimeInMillis;
+        }
+
         boolean isUserAccessTokenType =
-                isUserAccessTokenType(tokenReqMessageContext.getOauth2AccessTokenReqDTO().getGrantType());
+                isUserAccessTokenType(tokenReqMessageContext.getOauth2AccessTokenReqDTO().getGrantType(),
+                        tokenReqMessageContext);
 
         if (isUserAccessTokenType) {
             lifetimeInMillis = oAuthAppDO.getUserAccessTokenExpiryTime() * 1000;
@@ -736,9 +908,75 @@ public class JWTTokenIssuer extends OauthTokenIssuerImpl {
                                               OAuthTokenReqMessageContext tokenReqMessageContext)
             throws IdentityOAuth2Exception {
 
+        if (tokenReqMessageContext != null && tokenReqMessageContext.isPreIssueAccessTokenActionsExecuted()) {
+            return handleCustomClaimsInPreIssueAccessTokenResponse(jwtClaimsSetBuilder, tokenReqMessageContext);
+        }
+
+        if (tokenReqMessageContext != null &&
+                tokenReqMessageContext.getOauth2AccessTokenReqDTO() != null &&
+                StringUtils.equals(tokenReqMessageContext.getOauth2AccessTokenReqDTO().getGrantType(),
+                        OAuthConstants.GrantTypes.CLIENT_CREDENTIALS) &&
+                OAuthServerConfiguration.getInstance().isSkipOIDCClaimsForClientCredentialGrant()) {
+
+            // CC grant doesn't involve a user and hence skipping OIDC claims to CC grant type Access token.
+            return jwtClaimsSetBuilder.build();
+        }
         CustomClaimsCallbackHandler claimsCallBackHandler =
                 OAuthServerConfiguration.getInstance().getOpenIDConnectCustomClaimsCallbackHandler();
         return claimsCallBackHandler.handleCustomClaims(jwtClaimsSetBuilder, tokenReqMessageContext);
+    }
+
+    private JWTClaimsSet handleCustomClaims(JWTClaimsSet.Builder jwtClaimsSetBuilder,
+                                              OAuthTokenReqMessageContext tokenReqMessageContext, OAuthAppDO oAuthAppDO)
+            throws IdentityOAuth2Exception {
+
+        if (tokenReqMessageContext != null && tokenReqMessageContext.isPreIssueAccessTokenActionsExecuted()) {
+            return handleCustomClaimsInPreIssueAccessTokenResponse(jwtClaimsSetBuilder, tokenReqMessageContext);
+        }
+
+        if (tokenReqMessageContext != null && tokenReqMessageContext.getOauth2AccessTokenReqDTO() != null &&
+                shouldSkipOIDCClaimHandling(tokenReqMessageContext)) {
+            /*
+            CC grant and organization switch done from CC grant based token doesn't involve a user and hence skipping
+            OIDC claims those cases.
+             */
+            return jwtClaimsSetBuilder.build();
+        }
+
+        CustomClaimsCallbackHandler claimsCallBackHandler = ClaimHandlerUtil.getClaimsCallbackHandler(oAuthAppDO);
+        return claimsCallBackHandler.handleCustomClaims(jwtClaimsSetBuilder, tokenReqMessageContext);
+    }
+
+    private boolean shouldSkipOIDCClaimHandling(OAuthTokenReqMessageContext tokenReqMessageContext) {
+
+        String grantType = tokenReqMessageContext.getOauth2AccessTokenReqDTO().getGrantType();
+        // Check if the grant type is CLIENT_CREDENTIALS and the config to skip OIDC claims is enabled.
+        boolean isSkipOIDCClaimsForClientCredentialGrant =
+                OAuthConstants.GrantTypes.CLIENT_CREDENTIALS.equals(grantType) &&
+                        OAuthServerConfiguration.getInstance().isSkipOIDCClaimsForClientCredentialGrant();
+        // Check if the grant type is ORGANIZATION_SWITCH and the user type is APPLICATION
+        boolean isOrgSwitchWithAppUser = OAuthConstants.GrantTypes.ORGANIZATION_SWITCH.equals(grantType) &&
+                OAuthConstants.UserType.APPLICATION.equals(getAuthorizedUserType(null, tokenReqMessageContext));
+
+        return isSkipOIDCClaimsForClientCredentialGrant || isOrgSwitchWithAppUser;
+    }
+
+    private JWTClaimsSet handleCustomClaimsInPreIssueAccessTokenResponse(JWTClaimsSet.Builder jwtClaimsSetBuilder,
+                                                                         OAuthTokenReqMessageContext
+                                                                                 tokenReqMessageContext) {
+
+        Map<String, Object> customClaims = tokenReqMessageContext.getAdditionalAccessTokenClaims();
+
+        if (customClaims != null) {
+            if (log.isDebugEnabled()) {
+                log.debug("Pre issue access token actions are executed. " +
+                        "Returning the customized claim set from actions. Claims: " + customClaims.keySet());
+            }
+
+            customClaims.forEach(jwtClaimsSetBuilder::claim);
+        }
+
+        return jwtClaimsSetBuilder.build();
     }
 
     /**
@@ -757,13 +995,21 @@ public class JWTTokenIssuer extends OauthTokenIssuerImpl {
         return claimsCallBackHandler.handleCustomClaims(jwtClaimsSetBuilder, authzReqMessageContext);
     }
 
+    private JWTClaimsSet handleCustomClaims(JWTClaimsSet.Builder jwtClaimsSetBuilder,
+                                            OAuthAuthzReqMessageContext authzReqMessageContext, OAuthAppDO oAuthAppDO)
+            throws IdentityOAuth2Exception {
 
-    private boolean isUserAccessTokenType(String grantType) throws IdentityOAuth2Exception {
+        CustomClaimsCallbackHandler claimsCallBackHandler = ClaimHandlerUtil.getClaimsCallbackHandler(oAuthAppDO);
+        return claimsCallBackHandler.handleCustomClaims(jwtClaimsSetBuilder, authzReqMessageContext);
+    }
+
+    private boolean isUserAccessTokenType(String grantType, OAuthTokenReqMessageContext tokReqMsgCtx)
+            throws IdentityOAuth2Exception {
         AuthorizationGrantHandler grantHandler =
                 OAuthServerConfiguration.getInstance().getSupportedGrantTypes().get(grantType);
         // If grant handler is null ideally we would not come to this point as the flow will be broken before. So we
         // can guarantee grantHandler will not be null
-        return grantHandler.isOfTypeApplicationUser();
+        return grantHandler.isOfTypeApplicationUser(tokReqMsgCtx);
     }
 
     private JWTClaimsSet handleTokenBinding(JWTClaimsSet.Builder jwtClaimsSetBuilder,
@@ -795,7 +1041,7 @@ public class JWTTokenIssuer extends OauthTokenIssuerImpl {
         if (renewWithoutRevokingExistingEnabled && tokReqMsgCtx != null && tokReqMsgCtx.getTokenBinding() == null) {
             if (OAuth2ServiceComponentHolder.getJwtRenewWithoutRevokeAllowedGrantTypes()
                     .contains(tokReqMsgCtx.getOauth2AccessTokenReqDTO().getGrantType())) {
-                String tokenBindingValue = UUIDGenerator.generateUUID();
+                String tokenBindingValue = UUID.randomUUID().toString();
                 tokReqMsgCtx.setTokenBinding(
                         new TokenBinding(REQUEST_BINDING_TYPE, OAuth2Util.getTokenBindingReference(tokenBindingValue),
                                 tokenBindingValue));
@@ -804,8 +1050,16 @@ public class JWTTokenIssuer extends OauthTokenIssuerImpl {
 
         if (tokReqMsgCtx != null && tokReqMsgCtx.getTokenBinding() != null) {
             // Include token binding into the jwt token.
+            String bindingType = tokReqMsgCtx.getTokenBinding().getBindingType();
             jwtClaimsSetBuilder.claim(TOKEN_BINDING_REF, tokReqMsgCtx.getTokenBinding().getBindingReference());
-            jwtClaimsSetBuilder.claim(TOKEN_BINDING_TYPE, tokReqMsgCtx.getTokenBinding().getBindingType());
+            jwtClaimsSetBuilder.claim(TOKEN_BINDING_TYPE, bindingType);
+            if (OAuth2Constants.TokenBinderType.CERTIFICATE_BASED_TOKEN_BINDER.equals(bindingType)) {
+                String cnf = tokReqMsgCtx.getTokenBinding().getBindingValue();
+                if (StringUtils.isNotBlank(cnf)) {
+                    jwtClaimsSetBuilder.claim(OAuthConstants.CNF, Collections.singletonMap(OAuthConstants.X5T_S256,
+                            tokReqMsgCtx.getTokenBinding().getBindingValue()));
+                }
+            }
         }
         return jwtClaimsSetBuilder.build();
     }
@@ -832,5 +1086,55 @@ public class JWTTokenIssuer extends OauthTokenIssuerImpl {
             jwtClaimsSet = jwtClaimsSetBuilder.build();
         }
         return jwtClaimsSet;
+    }
+
+    /**
+     * Set entity_id claim to the JWT if token persistence is disabled. This is to identify the principal subject of the
+     * issuing token.
+     *
+     * @param jwtClaimsSetBuilder        JWT Claim Set Builder
+     * @param authAuthzReqMessageContext OAuthAuthzReqMessageContext
+     * @param tokenReqMessageContext     OAuthTokenReqMessageContext
+     * @param authenticatedUser          Authenticated User
+     * @param oAuthAppDO                 OAuthAppDO
+     * @throws IdentityOAuth2Exception If an error occurs while setting entity_id claim.
+     */
+    protected void setClaimsForNonPersistence(JWTClaimsSet.Builder jwtClaimsSetBuilder,
+                                              OAuthAuthzReqMessageContext authAuthzReqMessageContext,
+                                              OAuthTokenReqMessageContext tokenReqMessageContext,
+                                              AuthenticatedUser authenticatedUser,
+                                              OAuthAppDO oAuthAppDO) throws IdentityOAuth2Exception {
+
+        if (!OAuth2Util.isTokenPersistenceEnabled()) {
+            try {
+                /*
+                 * The entity_id is used to identify the principal subject for the issuing token. For user access
+                 * tokens, this is the user's unique ID. For application access tokens, this is the application's
+                 * consumer key.
+                 */
+                String userType = getAuthorizedUserType(authAuthzReqMessageContext, tokenReqMessageContext);
+                if (OAuthConstants.UserType.APPLICATION_USER.equals(userType)) {
+                    jwtClaimsSetBuilder.claim(OAuth2Constants.ENTITY_ID, authenticatedUser.getUserId());
+                } else if (OAuthConstants.UserType.APPLICATION.equals(userType)) {
+                    jwtClaimsSetBuilder.claim(OAuth2Constants.ENTITY_ID, oAuthAppDO.getOauthConsumerKey());
+                } else {
+                    throw new IdentityOAuth2Exception("Invalid user type: " + userType);
+                }
+            } catch (UserIdNotFoundException e) {
+                throw new IdentityOAuth2Exception("User id not found for user: "
+                        + authenticatedUser.getLoggableMaskedUserId(), e);
+            }
+            if (OAuth2ServiceComponentHolder.isConsentedTokenColumnEnabled()) {
+                boolean isConsented;
+                if (tokenReqMessageContext != null) {
+                    isConsented = tokenReqMessageContext.isConsentedToken();
+                } else {
+                    isConsented = authAuthzReqMessageContext.isConsentedToken();
+                }
+                // when no persistence of tokens, there is no existing token to check the consented value for.
+                jwtClaimsSetBuilder.claim(OAuth2Constants.IS_CONSENTED, isConsented);
+            }
+            jwtClaimsSetBuilder.claim(OAuth2Constants.IS_FEDERATED, authenticatedUser.isFederatedUser());
+        }
     }
 }

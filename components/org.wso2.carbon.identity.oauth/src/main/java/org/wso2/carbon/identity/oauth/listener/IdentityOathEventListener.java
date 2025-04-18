@@ -32,19 +32,24 @@ import org.wso2.carbon.identity.oauth.OAuthUtil;
 import org.wso2.carbon.identity.oauth.cache.AuthorizationGrantCache;
 import org.wso2.carbon.identity.oauth.cache.AuthorizationGrantCacheKey;
 import org.wso2.carbon.identity.oauth.common.OAuthConstants;
+import org.wso2.carbon.identity.oauth.internal.OAuthComponentServiceHolder;
 import org.wso2.carbon.identity.oauth.util.ClaimCache;
 import org.wso2.carbon.identity.oauth.util.ClaimMetaDataCache;
 import org.wso2.carbon.identity.oauth.util.ClaimMetaDataCacheEntry;
 import org.wso2.carbon.identity.oauth.util.ClaimMetaDataCacheKey;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
 import org.wso2.carbon.identity.oauth2.dao.OAuthTokenPersistenceFactory;
+import org.wso2.carbon.identity.oauth2.internal.OAuth2ServiceComponentHolder;
 import org.wso2.carbon.identity.oauth2.model.AccessTokenDO;
 import org.wso2.carbon.identity.oauth2.model.AuthzCodeDO;
+import org.wso2.carbon.identity.organization.management.organization.user.sharing.models.UserAssociation;
+import org.wso2.carbon.identity.organization.management.service.exception.OrganizationManagementException;
 import org.wso2.carbon.user.core.UserCoreConstants;
 import org.wso2.carbon.user.core.UserStoreException;
 import org.wso2.carbon.user.core.UserStoreManager;
 import org.wso2.carbon.user.core.common.AbstractUserStoreManager;
 import org.wso2.carbon.user.core.common.User;
+import org.wso2.carbon.user.core.service.RealmService;
 import org.wso2.carbon.user.core.util.UserCoreUtil;
 
 import java.util.ArrayList;
@@ -88,8 +93,9 @@ public class IdentityOathEventListener extends AbstractIdentityUserOperationEven
         }
 
         removeClaimCacheEntry(username, userStoreManager);
-
-        return OAuthUtil.revokeTokens(username, userStoreManager) &&
+        return OAuth2ServiceComponentHolder.getInstance()
+                .getRevocationProcessor()
+                .revokeTokens(username, userStoreManager) &&
                 OAuthUtil.revokeAuthzCodes(username, userStoreManager);
 
     }
@@ -154,7 +160,15 @@ public class IdentityOathEventListener extends AbstractIdentityUserOperationEven
         if (!isEnable()) {
             return true;
         }
-        return OAuthUtil.revokeTokens(userName, userStoreManager);
+        boolean isSuccessOnRevokeTokens = OAuth2ServiceComponentHolder.getInstance()
+                .getRevocationProcessor()
+                .revokeTokens(userName, userStoreManager);
+
+        boolean isSuccessOnRevokeAuthzCodes = OAuthUtil.revokeAuthzCodes(userName, userStoreManager);
+
+        boolean isSuccessOnRevokeAssociateUsersTokens = revokeTokensOfAssociatedUsers(userName, userStoreManager);
+
+        return isSuccessOnRevokeTokens && isSuccessOnRevokeAssociateUsersTokens && isSuccessOnRevokeAuthzCodes;
     }
 
     @Override
@@ -164,7 +178,16 @@ public class IdentityOathEventListener extends AbstractIdentityUserOperationEven
         if (!isEnable()) {
             return true;
         }
-        return OAuthUtil.revokeTokens(userName, userStoreManager);
+
+        boolean isSuccessOnRevokeTokens = OAuth2ServiceComponentHolder.getInstance()
+                .getRevocationProcessor()
+                .revokeTokens(userName, userStoreManager);
+
+        boolean isSuccessOnRevokeAuthzCodes = OAuthUtil.revokeAuthzCodes(userName, userStoreManager);
+
+        boolean isSuccessOnRevokeAssociateUsersTokens = revokeTokensOfAssociatedUsers(userName, userStoreManager);
+
+        return isSuccessOnRevokeTokens && isSuccessOnRevokeAssociateUsersTokens && isSuccessOnRevokeAuthzCodes;
     }
 
     @Override
@@ -186,7 +209,9 @@ public class IdentityOathEventListener extends AbstractIdentityUserOperationEven
             return true;
         }
         if (ArrayUtils.isNotEmpty(deletedRoles)) {
-            OAuthUtil.revokeTokens(userName, userStoreManager);
+            OAuth2ServiceComponentHolder.getInstance()
+                    .getRevocationProcessor()
+                    .revokeTokens(userName, userStoreManager);
         }
         return OAuthUtil.removeUserClaimsFromCache(userName, userStoreManager);
     }
@@ -200,7 +225,9 @@ public class IdentityOathEventListener extends AbstractIdentityUserOperationEven
             return true;
         }
         if (ArrayUtils.isNotEmpty(deletedInternalRoles)) {
-            OAuthUtil.revokeTokens(userName, userStoreManager);
+            OAuth2ServiceComponentHolder.getInstance()
+                    .getRevocationProcessor()
+                    .revokeTokens(userName, userStoreManager);
         }
         return OAuthUtil.removeUserClaimsFromCache(userName, userStoreManager);
     }
@@ -253,7 +280,9 @@ public class IdentityOathEventListener extends AbstractIdentityUserOperationEven
         if (CollectionUtils.isNotEmpty(roles)) {
             for (User user : userList) {
                 OAuthUtil.removeUserClaimsFromCache(user.getUsername(), userStoreManager);
-                OAuthUtil.revokeTokens(user.getUsername(), userStoreManager);
+                OAuth2ServiceComponentHolder.getInstance()
+                        .getRevocationProcessor()
+                        .revokeTokens(user.getUsername(), userStoreManager);
             }
         } else {
             if (log.isDebugEnabled()) {
@@ -283,7 +312,9 @@ public class IdentityOathEventListener extends AbstractIdentityUserOperationEven
             OAuthUtil.removeUserClaimsFromCache(username, userStoreManager);
         }
         for (String deletedUser : deletedUsers) {
-            OAuthUtil.revokeTokens(deletedUser, userStoreManager);
+            OAuth2ServiceComponentHolder.getInstance()
+                    .getRevocationProcessor()
+                    .revokeTokens(deletedUser, userStoreManager);
         }
         return true;
     }
@@ -295,7 +326,9 @@ public class IdentityOathEventListener extends AbstractIdentityUserOperationEven
                 (String) IdentityUtil.threadLocalProperties.get().get(IdentityCoreConstants.USER_ACCOUNT_STATE);
 
         if (errorCode != null && (errorCode.equalsIgnoreCase(UserCoreConstants.ErrorCode.USER_IS_LOCKED))) {
-            return OAuthUtil.revokeTokens(userName, userStoreManager);
+            return OAuth2ServiceComponentHolder.getInstance()
+                    .getRevocationProcessor()
+                    .revokeTokens(userName, userStoreManager);
         }
         return true;
     }
@@ -307,7 +340,9 @@ public class IdentityOathEventListener extends AbstractIdentityUserOperationEven
                 (String) IdentityUtil.threadLocalProperties.get().get(IdentityCoreConstants.USER_ACCOUNT_STATE);
 
         if (errorCode != null && errorCode.equalsIgnoreCase(IdentityCoreConstants.USER_ACCOUNT_DISABLED_ERROR_CODE)) {
-            return OAuthUtil.revokeTokens(userName, userStoreManager);
+            return OAuth2ServiceComponentHolder.getInstance()
+                    .getRevocationProcessor()
+                    .revokeTokens(userName, userStoreManager);
         }
         return true;
     }
@@ -388,5 +423,52 @@ public class IdentityOathEventListener extends AbstractIdentityUserOperationEven
         }
         ClaimCache.getInstance().clearCacheEntry(cacheEntry.getClaimCacheKey(),
                 IdentityTenantUtil.getTenantDomain(userStoreManager.getTenantId()));
+    }
+
+    /**
+     * Revoke access tokens of associated users.
+     *
+     * @param username         Username of the user.
+     * @param userStoreManager User store manager of the user.
+     * @return true if revocation is successfull. Else return false
+     */
+    private boolean revokeTokensOfAssociatedUsers(String username, UserStoreManager userStoreManager) {
+
+        if (log.isDebugEnabled()) {
+            log.debug("Revoking access tokens of associated users of user: " + username);
+        }
+
+        boolean isSuccessOnRevoking = true;
+        try {
+            String userId = ((AbstractUserStoreManager) userStoreManager).getUser(null, username).getUserID();
+            String tenantDomain = IdentityTenantUtil.getTenantDomain(userStoreManager.getTenantId());
+            String orgId = OAuthComponentServiceHolder.getInstance().getOrganizationManager()
+                    .resolveOrganizationId(tenantDomain);
+            List<UserAssociation> userAssociationList = OAuthComponentServiceHolder.getInstance()
+                    .getOrganizationUserSharingService().getUserAssociationsOfGivenUser(userId, orgId);
+
+            for (UserAssociation userAssociation : userAssociationList) {
+                String orgIdOfUserAssociation = userAssociation.getOrganizationId();
+                String tenantDomainOfUserAssociation = OAuthComponentServiceHolder.getInstance()
+                        .getOrganizationManager().resolveTenantDomain(orgIdOfUserAssociation);
+                RealmService realmService = OAuthComponentServiceHolder.getInstance().getRealmService();
+                UserStoreManager userStoreManagerOfUserAssociation = (UserStoreManager)
+                        realmService.getTenantUserRealm(
+                                IdentityTenantUtil.getTenantId(tenantDomainOfUserAssociation)).getUserStoreManager();
+                String usernameOfUserAssociation = ((AbstractUserStoreManager) userStoreManagerOfUserAssociation)
+                        .getUserNameFromUserID(userAssociation.getUserId());
+                boolean isSuccessOnSingleRevoke = OAuth2ServiceComponentHolder.getInstance()
+                        .getRevocationProcessor()
+                        .revokeTokens(usernameOfUserAssociation, userStoreManagerOfUserAssociation);
+                if (!isSuccessOnSingleRevoke) {
+                    isSuccessOnRevoking = false;
+                }
+            }
+        } catch (OrganizationManagementException | org.wso2.carbon.user.api.UserStoreException e) {
+            log.error("Error occurred while revoking access tokens of associated users.", e);
+            return false;
+        }
+
+        return isSuccessOnRevoking;
     }
 }
