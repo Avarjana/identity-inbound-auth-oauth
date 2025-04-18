@@ -19,6 +19,8 @@
 package org.wso2.carbon.identity.discovery;
 
 import org.apache.commons.lang.StringUtils;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.wso2.carbon.identity.core.util.IdentityUtil;
 
 /**
@@ -26,6 +28,8 @@ import org.wso2.carbon.identity.core.util.IdentityUtil;
  */
 public class DiscoveryUtil {
 
+    private static final Log log = LogFactory.getLog(DiscoveryUtil.class);
+    
     public static final String OIDC_USE_ENTITY_ID_AS_ISSUER_IN_DISCOVERY = "OAuth" +
             ".UseEntityIdAsIssuerInOidcDiscovery";
 
@@ -38,9 +42,16 @@ public class DiscoveryUtil {
         String useEntityIdAsIssuerInDiscovery =
                 IdentityUtil.getProperty(OIDC_USE_ENTITY_ID_AS_ISSUER_IN_DISCOVERY);
         if (StringUtils.isEmpty(useEntityIdAsIssuerInDiscovery)) {
+            if (log.isDebugEnabled()) {
+                log.debug("UseEntityIdAsIssuerInOidcDiscovery property not configured, using default value: true");
+            }
             return true;
         }
-        return Boolean.parseBoolean(useEntityIdAsIssuerInDiscovery);
+        boolean useEntityIdAsIssuer = Boolean.parseBoolean(useEntityIdAsIssuerInDiscovery);
+        if (log.isDebugEnabled()) {
+            log.debug("UseEntityIdAsIssuerInOidcDiscovery property configured with value: {}", useEntityIdAsIssuer);
+        }
+        return useEntityIdAsIssuer;
     }
 
 }

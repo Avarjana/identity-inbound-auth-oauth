@@ -19,6 +19,8 @@
 package org.wso2.carbon.identity.discovery;
 
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.wso2.carbon.identity.core.util.IdentityUtil;
 
 import java.util.HashMap;
@@ -31,6 +33,8 @@ import java.util.Map;
  */
 public class OIDProviderConfigResponse {
 
+    private static final Log log = LogFactory.getLog(OIDProviderConfigResponse.class);
+    
     private String issuer;
     private String authorizationEndpoint;
     private String pushedAuthorizationRequestEndpoint;
@@ -542,6 +546,9 @@ public class OIDProviderConfigResponse {
     }
 
     public Map<String, Object> getConfigMap() {
+        if (log.isDebugEnabled()) {
+            log.debug("Building OIDC provider configuration response for issuer: {}", this.issuer);
+        }
         Map<String, Object> configMap = new HashMap<String, Object>();
         configMap.put(DiscoveryConstants.ISSUER.toLowerCase(), this.issuer);
         configMap.put(DiscoveryConstants.ACR_VALUES_SUPPORTED.toLowerCase(), this.acrValuesSupported);
@@ -608,7 +615,11 @@ public class OIDProviderConfigResponse {
         configMap.put(DiscoveryConstants.WEBFINGER_ENDPOINT.toLowerCase(), this.webFingerEndpoint);
         configMap.put(DiscoveryConstants.TLS_CLIENT_CERTIFICATE_BOUND_ACCESS_TOKEN.toLowerCase(),
                 this.tlsClientCertificateBoundAccessTokens);
-        if (Boolean.parseBoolean(IdentityUtil.getProperty(MUTUAL_TLS_ALIASES_ENABLED))) {
+        boolean mtlsEnabled = Boolean.parseBoolean(IdentityUtil.getProperty(MUTUAL_TLS_ALIASES_ENABLED));
+        if (log.isDebugEnabled()) {
+            log.debug("MTLS aliases enabled: {}", mtlsEnabled);
+        }
+        if (mtlsEnabled) {
             Map<String, String> mtlsAliases = new HashMap<String, String>();
             mtlsAliases.put(DiscoveryConstants.TOKEN_ENDPOINT.toLowerCase(), this.mtlsTokenEndpoint);
             mtlsAliases.put(DiscoveryConstants.PUSHED_AUTHORIZATION_REQUEST_ENDPOINT.toLowerCase(),

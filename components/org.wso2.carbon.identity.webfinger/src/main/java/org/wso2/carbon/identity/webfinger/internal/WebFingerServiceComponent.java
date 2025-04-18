@@ -52,8 +52,10 @@ public class WebFingerServiceComponent {
             bundleContext.registerService(WebFingerProcessor.class.getName(), webFingerProcessor, null);
             WebFingerServiceComponentHolder.setWebFingerProcessor(webFingerProcessor);
             if (log.isDebugEnabled()) {
-                log.debug("OpenID WebFinger bundle is activated.");
+                log.debug("WebFingerProcessor registered as an OSGi service");
+                log.debug("WebFinger bundle is activated");
             }
+            log.info("WebFinger component activated successfully");
 
             // Register OpenID Connect WebFinger servlet
             HttpService httpService = WebFingerServiceComponentHolder.getHttpService();
@@ -61,8 +63,11 @@ public class WebFingerServiceComponent {
                     "/.well-known/webfinger");
             try {
                 httpService.registerServlet("/.well-known/webfinger", webFingerServlet, null, null);
+                if (log.isDebugEnabled()) {
+                    log.debug("WebFinger servlet registered at /.well-known/webfinger");
+                }
             } catch (Exception e) {
-                String errMsg = "Error when registering Web Finger Servlet via the HttpService.";
+                String errMsg = "Error when registering WebFinger servlet via the HttpService";
                 log.error(errMsg, e);
                 throw new RuntimeException(errMsg, e);
             }
@@ -80,14 +85,14 @@ public class WebFingerServiceComponent {
     )
     protected void setRealmService(RealmService realmService) {
         if (log.isDebugEnabled()) {
-            log.info("Setting the Realm Service");
+            log.debug("Setting the Realm Service in WebFinger component");
         }
         WebFingerServiceComponentHolder.setRealmService(realmService);
     }
 
     protected void unsetRealmService(RealmService realmService) {
         if (log.isDebugEnabled()) {
-            log.info("Unsetting the Realm Service");
+            log.debug("Unsetting the Realm Service in WebFinger component");
         }
         WebFingerServiceComponentHolder.setRealmService(null);
     }

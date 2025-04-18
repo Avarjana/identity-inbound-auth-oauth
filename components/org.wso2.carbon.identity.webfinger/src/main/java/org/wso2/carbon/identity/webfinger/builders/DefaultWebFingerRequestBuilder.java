@@ -46,12 +46,22 @@ public class DefaultWebFingerRequestBuilder implements WebFingerRequestBuilder {
 
     @Override
     public WebFingerRequest buildRequest(HttpServletRequest request) throws WebFingerEndpointException {
+        if (log.isDebugEnabled()) {
+            log.debug("Building WebFinger request from HTTP request from: {}", request.getRemoteAddr());
+        }
+        
         WebFingerRequest webFingerRequest = new WebFingerRequest();
         List<String> parameters = Collections.list(request.getParameterNames());
+        
+        if (log.isDebugEnabled()) {
+            log.debug("WebFinger request parameters: {}", String.join(", ", parameters));
+        }
+        
         if (parameters.size() != 2 || !parameters.contains(WebFingerConstants.REL) || !parameters.contains
                 (WebFingerConstants.RESOURCE)) {
-            throw new WebFingerEndpointException(WebFingerConstants.ERROR_CODE_INVALID_REQUEST, "Bad Web " +
-                    "Finger request.");
+            String errorMsg = "Bad WebFinger request. Required parameters 'rel' and 'resource' must be present";
+            log.warn(errorMsg);
+            throw new WebFingerEndpointException(WebFingerConstants.ERROR_CODE_INVALID_REQUEST, errorMsg);
         }
         webFingerRequest.setServletRequest(request);
         String resource = request.getParameter(WebFingerConstants.RESOURCE);
@@ -59,44 +69,79 @@ public class DefaultWebFingerRequestBuilder implements WebFingerRequestBuilder {
         webFingerRequest.setResource(resource);
 
         if (StringUtils.isBlank(resource)) {
-            log.warn("Can't normalize null or empty URI: " + resource);
+            log.warn("Can't normalize null or empty URI in WebFinger request");
             throw new WebFingerEndpointException(WebFingerConstants.ERROR_CODE_INVALID_RESOURCE, "Null or empty URI.");
-
         } else {
+            if (log.isDebugEnabled()) {
+                log.debug("Processing WebFinger resource URI: {}", resource);
+            }
+            
             URI resourceURI = URI.create(resource);
             if (StringUtils.isBlank(resourceURI.getScheme())) {
+                String errorMsg = "Scheme of the resource URI cannot be empty";
+                log.warn(errorMsg);
                 throw new WebFingerEndpointException("Scheme of the resource cannot be empty");
             }
             String userInfo;
             if (WebFingerConstants.ACCT_SCHEME.equals(resourceURI.getScheme())) {
-                //acct scheme
+                // acct scheme
+                if (log.isDebugEnabled()) {
+                    log.debug("Processing 'acct' scheme URI");
+                }
+                
                 userInfo = resourceURI.getSchemeSpecificPart();
                 if (!userInfo.contains("@")) {
-                    throw new WebFingerEndpointException(WebFingerConstants.ERROR_CODE_INVALID_REQUEST,
-                            "Invalid host value.");
+                    String errorMsg = "Invalid host value in acct URI - missing @ symbol";
+                    log.warn(errorMsg);
+                    throw new WebFingerEndpointException(WebFingerConstants.ERROR_CODE_INVALID_REQUEST, errorMsg);
                 }
                 userInfo = userInfo.substring(0, userInfo.lastIndexOf('@'));
+                
+                if (log.isDebugEnabled()) {
+                    log.debug("Extracted user info from acct URI: {}", userInfo);
+                }
             } else {
-                //https scheme
+                // https or other scheme
+                if (log.isDebugEnabled()) {
+                    log.debug("Processing '{}' scheme URI", resourceURI.getScheme());
+                }
+                
                 userInfo = resourceURI.getUserInfo();
                 webFingerRequest.setScheme(resourceURI.getScheme());
                 webFingerRequest.setHost(resourceURI.getHost());
                 webFingerRequest.setPort(resourceURI.getPort());
                 webFingerRequest.setPath(resourceURI.getPath());
                 webFingerRequest.setQuery(resourceURI.getQuery());
+                
+                if (log.isDebugEnabled()) {
+                    log.debug("Extracted components - host: {}, port: {}, path: {}", 
+                            resourceURI.getHost(), resourceURI.getPort(), resourceURI.getPath());
+                }
             }
 
             String tenant;
             if (StringUtils.isNotBlank(userInfo)) {
                 try {
                     userInfo = URLDecoder.decode(userInfo, "UTF-8");
+                    if (log.isDebugEnabled()) {
+                        log.debug("URL-decoded user info: {}", userInfo);
+                    }
                 } catch (UnsupportedEncodingException e) {
-                    throw new WebFingerEndpointException("Cannot decode the userinfo");
+                    String errorMsg = "Cannot decode the user info with UTF-8 encoding";
+                    log.error(errorMsg, e);
+                    throw new WebFingerEndpointException(errorMsg);
                 }
                 tenant = MultitenantUtils.getTenantDomain(userInfo);
                 webFingerRequest.setUserInfo(resourceURI.getUserInfo());
+                
+                if (log.isDebugEnabled()) {
+                    log.debug("Extracted tenant domain from user info: {}", tenant);
+                }
             } else {
                 tenant = MultitenantConstants.SUPER_TENANT_DOMAIN_NAME;
+                if (log.isDebugEnabled()) {
+                    log.debug("No user info present, using super tenant domain");
+                }
             }
             validateTenant(tenant);
             webFingerRequest.setTenant(tenant);
@@ -106,14 +151,29 @@ public class DefaultWebFingerRequestBuilder implements WebFingerRequestBuilder {
     }
 
     public static void validateTenant(String tenantDomain) throws WebFingerEndpointException {
+        if (log.isDebugEnabled()) {
+            log.debug("Validating tenant domain: {}", tenantDomain);
+        }
+        
         try {
-            int tenantId = WebFingerServiceComponentHolder.getRealmService().getTenantManager().getTenantId
-                    (tenantDomain);
+            int tenantId = WebFingerServiceComponentHolder.getRealmService().getTenantManager().getTenantId(tenantDomain);
+            
+            if (log.isDebugEnabled()) {
+                log.debug("Tenant ID for domain '{}': {}", tenantDomain, tenantId);
+            }
+            
             if (tenantId < 0 && tenantId != MultitenantConstants.SUPER_TENANT_ID) {
-                throw new WebFingerEndpointException(WebFingerConstants.ERROR_CODE_INVALID_RESOURCE, "The tenant " +
-                        "domain is not valid.");
+                String errorMsg = "The tenant domain '" + tenantDomain + "' is not valid";
+                log.warn(errorMsg);
+                throw new WebFingerEndpointException(WebFingerConstants.ERROR_CODE_INVALID_RESOURCE, errorMsg);
+            }
+            
+            if (log.isDebugEnabled()) {
+                log.debug("Tenant domain '{}' validation successful", tenantDomain);
             }
         } catch (UserStoreException e) {
+            String errorMsg = "Error validating tenant domain: " + tenantDomain;
+            log.error(errorMsg, e);
             throw new WebFingerEndpointException(WebFingerConstants.ERROR_CODE_INVALID_RESOURCE, e.getMessage());
         }
     }

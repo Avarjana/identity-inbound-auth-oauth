@@ -49,12 +49,14 @@ public class OIDCDiscoveryServiceComponent {
         try {
             bundleContext = context.getBundleContext();
             bundleContext.registerService(OIDCProcessor.class.getName(), DefaultOIDCProcessor.getInstance(), null);
-            // exposing server configuration as a service
+            
             if (log.isDebugEnabled()) {
+                log.debug("DefaultOIDCProcessor registered as a service");
                 log.debug("Identity OIDCDiscovery bundle is activated");
             }
+            log.info("OpenID Connect Discovery component activated successfully");
         } catch (Throwable e) {
-            log.error("Error while activating OIDCDiscoveryServiceComponent", e);
+            log.error("Error while activating OpenID Connect Discovery component", e);
         }
     }
 
@@ -68,14 +70,14 @@ public class OIDCDiscoveryServiceComponent {
     protected void setClaimManagementService(ClaimMetadataManagementService registryService) {
         OIDCDiscoveryDataHolder.getInstance().setClaimManagementService(registryService);
         if (log.isDebugEnabled()) {
-            log.debug("RegistryService set in Identity Claim Management bundle");
+            log.debug("ClaimMetadataManagementService set in OpenID Connect Discovery component");
         }
     }
 
     protected void unsetClaimManagementService(ClaimMetadataManagementService registryService) {
         OIDCDiscoveryDataHolder.getInstance().setClaimManagementService(null);
         if (log.isDebugEnabled()) {
-            log.debug("RegistryService unset in Identity Claim Management bundle");
+            log.debug("ClaimMetadataManagementService unset in OpenID Connect Discovery component");
         }
     }
 

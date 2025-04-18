@@ -19,6 +19,8 @@
 package org.wso2.carbon.identity.discovery.builders;
 
 import org.apache.commons.lang.StringUtils;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.wso2.carbon.base.MultitenantConstants;
 import org.wso2.carbon.identity.discovery.OIDCDiscoveryEndPointException;
 import org.wso2.carbon.identity.discovery.OIDProviderRequest;
@@ -32,16 +34,34 @@ import javax.servlet.http.HttpServletRequest;
  */
 public class DefaultOIDCProviderRequestBuilder implements OIDCProviderRequestBuilder {
 
+    private static final Log log = LogFactory.getLog(DefaultOIDCProviderRequestBuilder.class);
+
     @Override
     public OIDProviderRequest buildRequest(HttpServletRequest request, String tenant) throws
             OIDCDiscoveryEndPointException {
+        if (log.isDebugEnabled()) {
+            log.debug("Building OIDC provider request for URI: {}", request.getRequestURI());
+        }
+        
         OIDProviderRequest requestObject = new OIDProviderRequest();
         requestObject.setUri(request.getRequestURI());
+        
+        String tenantDomain;
         if (StringUtils.isNotBlank(tenant)) {
-            requestObject.setTenantDomain(tenant);
+            tenantDomain = tenant;
         } else {
-            requestObject.setTenantDomain(MultitenantConstants.SUPER_TENANT_DOMAIN_NAME);
+            tenantDomain = MultitenantConstants.SUPER_TENANT_DOMAIN_NAME;
+            if (log.isDebugEnabled()) {
+                log.debug("No tenant specified, using super tenant domain");
+            }
         }
+        
+        requestObject.setTenantDomain(tenantDomain);
+        
+        if (log.isDebugEnabled()) {
+            log.debug("OIDC provider request built for tenant domain: {}", tenantDomain);
+        }
+        
         return requestObject;
     }
 

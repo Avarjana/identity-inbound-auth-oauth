@@ -65,19 +65,19 @@ public class DefaultOIDCProcessor implements OIDCProcessor {
     public int handleError(OIDCDiscoveryEndPointException error) {
 
         if (log.isDebugEnabled()) {
-            log.debug(error);
+            log.debug("Error in OIDC discovery endpoint: {}", error.getMessage());
         }
         String errorCode = error.getErrorCode();
         if (errorCode.equals(OIDCDiscoveryEndPointException.ERROR_CODE_NO_OPENID_PROVIDER_FOUND)) {
-            log.error(OIDCDiscoveryEndPointException.ERROR_MESSAGE_NO_OPENID_PROVIDER_FOUND, error);
+            log.error("No OpenID provider found: {}", error.getMessage(), error);
         } else if (errorCode.equals(OIDCDiscoveryEndPointException.ERROR_CODE_INVALID_REQUEST)) {
-            log.error(OIDCDiscoveryEndPointException.ERROR_MESSAGE_INVALID_REQUEST, error);
+            log.error("Invalid OIDC discovery request: {}", error.getMessage(), error);
         } else if (errorCode.equals(OIDCDiscoveryEndPointException.ERROR_CODE_INVALID_TENANT)) {
-            log.error(OIDCDiscoveryEndPointException.ERROR_MESSAGE_INVALID_TENANT, error);
+            log.error("Invalid tenant in OIDC discovery request: {}", error.getMessage(), error);
         } else if (errorCode.equals(OIDCDiscoveryEndPointException.ERROR_CODE_JSON_EXCEPTION)) {
-            log.error(OIDCDiscoveryEndPointException.ERROR_MESSAGE_JSON_EXCEPTION, error);
+            log.error("JSON exception in OIDC discovery: {}", error.getMessage(), error);
         } else {
-            log.error("Internal server error occurred.", error);
+            log.error("Internal server error occurred in OIDC discovery: {}", error.getMessage(), error);
         }
         return HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
     }

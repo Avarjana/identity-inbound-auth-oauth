@@ -55,17 +55,30 @@ public class ProviderConfigBuilder {
 
     public OIDProviderConfigResponse buildOIDProviderConfig(OIDProviderRequest request) throws
             OIDCDiscoveryEndPointException, ServerConfigurationException {
+        if (log.isDebugEnabled()) {
+            log.debug("Building OIDC provider configuration for tenant domain: {}", request.getTenantDomain());
+        }
         OIDProviderConfigResponse providerConfig = new OIDProviderConfigResponse();
         String tenantDomain = request.getTenantDomain();
         if (isUseEntityIdAsIssuerInOidcDiscovery()) {
             try {
-                providerConfig.setIssuer(OAuth2Util.getIdTokenIssuer(tenantDomain));
+                String idTokenIssuer = OAuth2Util.getIdTokenIssuer(tenantDomain);
+                providerConfig.setIssuer(idTokenIssuer);
+                if (log.isDebugEnabled()) {
+                    log.debug("Using entity ID as issuer: {}", idTokenIssuer);
+                }
             } catch (IdentityOAuth2Exception e) {
-                throw new ServerConfigurationException(String.format("Error while retrieving OIDC Id token issuer " +
-                        "value for tenant domain: %s", tenantDomain), e);
+                String errorMsg = String.format("Error while retrieving OIDC Id token issuer value for tenant domain: %s", 
+                        tenantDomain);
+                log.error(errorMsg, e);
+                throw new ServerConfigurationException(errorMsg, e);
             }
         } else {
-            providerConfig.setIssuer(OAuth2Util.getIDTokenIssuer());
+            String idTokenIssuer = OAuth2Util.getIDTokenIssuer();
+            providerConfig.setIssuer(idTokenIssuer);
+            if (log.isDebugEnabled()) {
+                log.debug("Using default issuer: {}", idTokenIssuer);
+            }
         }
         providerConfig.setAuthorizationEndpoint(OAuth2Util.OAuthURL.getOAuth2AuthzEPUrl());
         providerConfig.setPushedAuthorizationRequestEndpoint(OAuth2Util.OAuthURL.getOAuth2ParEPUrl());
@@ -80,17 +93,33 @@ public class ProviderConfigBuilder {
         providerConfig.setCodeChallengeMethodsSupported(OAuth2Util.getSupportedCodeChallengeMethods()
                 .toArray(new String[0]));
         try {
-            providerConfig.setIntrospectionEndpoint(OAuth2Util.OAuthURL.getOAuth2IntrospectionEPUrl(tenantDomain));
-            providerConfig.setRegistrationEndpoint(OAuth2Util.OAuthURL.getOAuth2DCREPUrl(tenantDomain));
-            providerConfig.setJwksUri(OAuth2Util.OAuthURL.getOAuth2JWKSPageUrl(tenantDomain));
+            String introspectionEndpoint = OAuth2Util.OAuthURL.getOAuth2IntrospectionEPUrl(tenantDomain);
+            String registrationEndpoint = OAuth2Util.OAuthURL.getOAuth2DCREPUrl(tenantDomain);
+            String jwksUri = OAuth2Util.OAuthURL.getOAuth2JWKSPageUrl(tenantDomain);
+            
+            providerConfig.setIntrospectionEndpoint(introspectionEndpoint);
+            providerConfig.setRegistrationEndpoint(registrationEndpoint);
+            providerConfig.setJwksUri(jwksUri);
+            
+            if (log.isDebugEnabled()) {
+                log.debug("Set tenant-specific endpoints - Introspection: {}, Registration: {}, JWKS URI: {}",
+                        introspectionEndpoint, registrationEndpoint, jwksUri);
+            }
         } catch (URISyntaxException e) {
-            throw new ServerConfigurationException("Error while building tenant specific url", e);
+            String errorMsg = "Error while building tenant specific URLs for tenant: " + tenantDomain;
+            log.error(errorMsg, e);
+            throw new ServerConfigurationException(errorMsg, e);
         }
         List<String> scopes = OAuth2Util.getOIDCScopes(tenantDomain);
         providerConfig.setScopesSupported(scopes.toArray(new String[scopes.size()]));
         try {
             List<ExternalClaim> claims = OIDCDiscoveryDataHolder.getInstance().getClaimManagementService()
                     .getExternalClaims(OIDC_CLAIM_DIALECT, tenantDomain);
+            
+            if (log.isDebugEnabled()) {
+                log.debug("Retrieved {} OIDC claims for tenant domain: {}", claims.size(), tenantDomain);
+            }
+            
             String[] claimArray = new String[claims.size() + 2];
             int i;
             for (i = 0; i < claims.size(); i++) {
@@ -100,14 +129,22 @@ public class ProviderConfigBuilder {
             claimArray[i] = "acr";
             providerConfig.setClaimsSupported(claimArray);
         } catch (ClaimMetadataException e) {
-            throw new ServerConfigurationException("Error while retrieving OIDC claim dialect", e);
+            String errorMsg = "Error while retrieving OIDC claim dialect for tenant: " + tenantDomain;
+            log.error(errorMsg, e);
+            throw new ServerConfigurationException(errorMsg, e);
         }
         try {
-            providerConfig.setIdTokenSigningAlgValuesSupported(new String[]{
-                OAuth2Util.mapSignatureAlgorithmForJWSAlgorithm
-                        (OAuthServerConfiguration.getInstance().getIdTokenSignatureAlgorithm()).getName()});
+            String sigAlgorithm = OAuth2Util.mapSignatureAlgorithmForJWSAlgorithm(
+                    OAuthServerConfiguration.getInstance().getIdTokenSignatureAlgorithm()).getName();
+            providerConfig.setIdTokenSigningAlgValuesSupported(new String[]{ sigAlgorithm });
+            
+            if (log.isDebugEnabled()) {
+                log.debug("ID token signing algorithm: {}", sigAlgorithm);
+            }
         } catch (IdentityOAuth2Exception e) {
-            throw new ServerConfigurationException("Unsupported signature algorithm configured.", e);
+            String errorMsg = "Unsupported signature algorithm configured for ID token";
+            log.error(errorMsg, e);
+            throw new ServerConfigurationException(errorMsg, e);
         }
 
         Set<String> supportedResponseTypeNames = OAuthServerConfiguration.getInstance().getSupportedResponseTypeNames();
@@ -123,12 +160,17 @@ public class ProviderConfigBuilder {
                 IdentityUtil.getProperty(IdentityConstants.OAuth.OIDC_LOGOUT_EP_URL),
                 IdentityUtil.getProperty(IdentityConstants.OAuth.OIDC_LOGOUT_EP_URL_V2)));
         try {
-            providerConfig.setUserinfoSigningAlgValuesSupported(new String[] {
-                    OAuth2Util.mapSignatureAlgorithmForJWSAlgorithm(
-                            OAuthServerConfiguration.getInstance().getUserInfoJWTSignatureAlgorithm()).getName()
-            });
+            String userInfoSigningAlg = OAuth2Util.mapSignatureAlgorithmForJWSAlgorithm(
+                    OAuthServerConfiguration.getInstance().getUserInfoJWTSignatureAlgorithm()).getName();
+            providerConfig.setUserinfoSigningAlgValuesSupported(new String[] { userInfoSigningAlg });
+            
+            if (log.isDebugEnabled()) {
+                log.debug("UserInfo JWT signing algorithm: {}", userInfoSigningAlg);
+            }
         } catch (IdentityOAuth2Exception e) {
-            throw new ServerConfigurationException("Unsupported signature algorithm configured.", e);
+            String errorMsg = "Unsupported signature algorithm configured for UserInfo JWT";
+            log.error(errorMsg, e);
+            throw new ServerConfigurationException(errorMsg, e);
         }
 
         providerConfig.setTokenEndpointAuthMethodsSupported(OAuth2Util.getSupportedClientAuthMethods());
@@ -141,8 +183,15 @@ public class ProviderConfigBuilder {
         providerConfig.setBackchannelLogoutSupported(Boolean.TRUE);
         providerConfig.setBackchannelLogoutSessionSupported(Boolean.TRUE);
 
-        if (OAuth2Util.getSupportedGrantTypes().contains(DEVICE_FLOW_GRANT_TYPE)) {
-            providerConfig.setDeviceAuthorizationEndpoint(OAuth2Util.OAuthURL.getDeviceAuthzEPUrl());
+        boolean supportsDeviceFlow = OAuth2Util.getSupportedGrantTypes().contains(DEVICE_FLOW_GRANT_TYPE);
+        if (supportsDeviceFlow) {
+            String deviceAuthzEndpoint = OAuth2Util.OAuthURL.getDeviceAuthzEPUrl();
+            providerConfig.setDeviceAuthorizationEndpoint(deviceAuthzEndpoint);
+            if (log.isDebugEnabled()) {
+                log.debug("Device flow grant type is supported, device authorization endpoint: {}", deviceAuthzEndpoint);
+            }
+        } else if (log.isDebugEnabled()) {
+            log.debug("Device flow grant type is not supported");
         }
         List<String> supportedTokenEndpointSigningAlgorithms = OAuthServerConfiguration.getInstance()
                 .getSupportedTokenEndpointSigningAlgorithms();
@@ -157,8 +206,18 @@ public class ProviderConfigBuilder {
         final Set<String> authorizationDetailTypes = AuthorizationDetailsProcessorFactory.getInstance()
                 .getSupportedAuthorizationDetailTypes();
         if (authorizationDetailTypes != null && !authorizationDetailTypes.isEmpty()) {
-            providerConfig
-                    .setAuthorizationDetailsTypesSupported(authorizationDetailTypes.stream().toArray(String[]::new));
+            String[] typesArray = authorizationDetailTypes.stream().toArray(String[]::new);
+            providerConfig.setAuthorizationDetailsTypesSupported(typesArray);
+            
+            if (log.isDebugEnabled()) {
+                log.debug("Authorization details types supported: {}", String.join(", ", authorizationDetailTypes));
+            }
+        } else if (log.isDebugEnabled()) {
+            log.debug("No authorization details types are supported");
+        }
+        
+        if (log.isDebugEnabled()) {
+            log.debug("Successfully built OIDC provider configuration for tenant: {}", tenantDomain);
         }
         return providerConfig;
     }

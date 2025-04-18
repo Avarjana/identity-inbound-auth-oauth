@@ -18,25 +18,36 @@
 
 package org.wso2.carbon.identity.discovery.internal;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.wso2.carbon.identity.claim.metadata.mgt.ClaimMetadataManagementService;
 
 /**
  * Data holder class for the discovery component
  */
 public class OIDCDiscoveryDataHolder {
-
+    
+    private static final Log log = LogFactory.getLog(OIDCDiscoveryDataHolder.class);
     private static OIDCDiscoveryDataHolder instance = new OIDCDiscoveryDataHolder();
+    
     public static OIDCDiscoveryDataHolder getInstance() {
         return instance;
     }
+    
     private ClaimMetadataManagementService claimManagementService;
 
 
     public void setClaimManagementService(ClaimMetadataManagementService identityClaimManagementService) {
         this.claimManagementService = identityClaimManagementService;
+        if (log.isDebugEnabled() && identityClaimManagementService != null) {
+            log.debug("ClaimMetadataManagementService reference is set in the OpenID Connect Discovery bundle");
+        }
     }
 
     public ClaimMetadataManagementService getClaimManagementService() {
+        if (claimManagementService == null && log.isDebugEnabled()) {
+            log.debug("ClaimMetadataManagementService reference is null");
+        }
         return claimManagementService;
     }
 }
