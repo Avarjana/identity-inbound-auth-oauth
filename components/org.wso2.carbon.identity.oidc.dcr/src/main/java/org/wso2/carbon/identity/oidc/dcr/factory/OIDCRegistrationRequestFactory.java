@@ -58,7 +58,7 @@ public class OIDCRegistrationRequestFactory extends RegistrationRequestFactory {
             }
         }
         if (log.isDebugEnabled()) {
-            log.debug("canHandle " + canHandle + " by OIDCRegistrationRequestFactory.");
+            log.debug("OIDC Registration request handler status: {}", canHandle);
         }
         return canHandle;
     }
@@ -69,7 +69,7 @@ public class OIDCRegistrationRequestFactory extends RegistrationRequestFactory {
             throws FrameworkClientException {
 
         if (log.isDebugEnabled()) {
-            log.debug("create RegistrationRequest.RegistrationRequestBuilder by OIDCRegistrationRequestFactory.");
+            log.debug("Creating OIDC registration request builder");
         }
         OIDCRegistrationRequest.OIDCRegistrationRequestBuilder registerRequestBuilder = new
                 OIDCRegistrationRequest.OIDCRegistrationRequestBuilder(request, response);
@@ -94,8 +94,7 @@ public class OIDCRegistrationRequestFactory extends RegistrationRequestFactory {
             super.create(registerRequestBuilder, request, response);
         } else {
             // This else part will not be reached from application logic.
-            log.error("Can't create registerRequestBuilder. builder is not an instance of " +
-                    "OIDCRegistrationRequest.OIDCRegistrationRequestBuilder");
+            log.error("Failed to create OIDC registration request builder: Invalid builder type");
         }
     }
 

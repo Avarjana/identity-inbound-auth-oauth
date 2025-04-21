@@ -51,9 +51,11 @@ public class ClientAttestationServiceHolder {
      * @return The Client Attestation Service instance.
      */
     public static ClientAttestationService getClientAttestationService() {
-
         if (ClientAttestationHolder.SERVICE == null) {
-            throw new IllegalStateException("ClientAttestationService is not available from OSGI context.");
+            String errorMsg = "ClientAttestationService is not available from OSGI context";
+            // Since this is a service holder class, we don't have a logger, but this is an error condition
+            // that should be captured by the caller's logger
+            throw new IllegalStateException(errorMsg);
         }
         return ClientAttestationHolder.SERVICE;
     }
@@ -64,9 +66,11 @@ public class ClientAttestationServiceHolder {
      * @return The Application Management Service instance.
      */
     public static ApplicationManagementService getApplicationManagementService() {
-
         if (ApplicationManagementHolder.SERVICE == null) {
-            throw new IllegalStateException("ApplicationManagementService is not available from OSGI context.");
+            String errorMsg = "ApplicationManagementService is not available from OSGI context";
+            // Since this is a service holder class, we don't have a logger, but this is an error condition
+            // that should be captured by the caller's logger
+            throw new IllegalStateException(errorMsg);
         }
         return ApplicationManagementHolder.SERVICE;
     }

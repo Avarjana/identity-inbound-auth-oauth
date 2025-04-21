@@ -41,8 +41,9 @@ public class JsonProcessingExceptionMapper implements ExceptionMapper<Unrecogniz
     @Override
     public Response toResponse(UnrecognizedPropertyException e) {
 
+        log.warn("Invalid JSON format in request. Unrecognized property: '" + e.getPropertyName() + "'");
         if (log.isDebugEnabled()) {
-            log.debug("Provided JSON request content is not in the valid format:", e);
+            log.debug("Provided JSON request content is not in the valid format. Unrecognized property: '{}'", e.getPropertyName(), e);
         }
 
         Oauth2ScopeConstants.ErrorMessages error = Oauth2ScopeConstants.ErrorMessages.ERROR_CODE_BAD_REQUEST;

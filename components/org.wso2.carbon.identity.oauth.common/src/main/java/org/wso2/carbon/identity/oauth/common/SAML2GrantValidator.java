@@ -17,6 +17,8 @@
  */
 package org.wso2.carbon.identity.oauth.common;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.oltu.oauth2.common.OAuth;
 import org.apache.oltu.oauth2.common.exception.OAuthProblemException;
 import org.apache.oltu.oauth2.common.validators.AbstractValidator;
@@ -30,15 +32,28 @@ import static org.wso2.carbon.identity.oauth.common.OAuthCommonUtil.validateCont
  */
 public class SAML2GrantValidator extends AbstractValidator<HttpServletRequest> {
 
+    private static final Log log = LogFactory.getLog(SAML2GrantValidator.class);
+
     public SAML2GrantValidator() {
 
         requiredParams.add(OAuth.OAUTH_GRANT_TYPE);
         requiredParams.add(OAuth.OAUTH_ASSERTION);
+        
+        if (log.isDebugEnabled()) {
+            log.debug("Initialized SAML2GrantValidator with required parameters: {} and {}", 
+                    OAuth.OAUTH_GRANT_TYPE, OAuth.OAUTH_ASSERTION);
+        }
     }
 
     @Override
     public void validateContentType(HttpServletRequest request) throws OAuthProblemException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Validating content type for SAML2 grant request");
+        }
         validateContentTypes(request);
+        if (log.isDebugEnabled()) {
+            log.debug("Content type validation successful for SAML2 grant request");
+        }
     }
 }

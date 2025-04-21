@@ -68,7 +68,12 @@ public class OAuthClientAuthenticatorProxy extends AbstractPhaseInterceptor<Mess
 
         Map<String, List> bodyContentParams = getContentParams(message);
         HttpServletRequest request = ((HttpServletRequest) message.get(HTTP_REQUEST));
+        String requestPath = (String) message.get(Message.REQUEST_URI);
+        
         if (canHandle(message)) {
+            if (log.isDebugEnabled()) {
+                log.debug("Handling OAuth client authentication request for path: " + requestPath);
+            }
             try {
                 OAuthClientAuthnContext oAuthClientAuthnContext = OAuthClientAuthnServiceFactory
                         .getOAuthClientAuthnService().authenticateClient(request, bodyContentParams);
@@ -82,10 +87,12 @@ public class OAuthClientAuthenticatorProxy extends AbstractPhaseInterceptor<Mess
                     if (StringUtils.isBlank(oAuthClientAuthnContext.getErrorMessage())) {
                         oAuthClientAuthnContext.setErrorMessage("Unsupported client authentication mechanism");
                     }
+                    log.warn("No client authenticator engaged for request path: " + requestPath);
                 }
                 setContextToRequest(request, oAuthClientAuthnContext);
             } catch (DBConnectionException e) {
-                log.error("Unable to retrieve a connection to DB while authenticating the client", e);
+                log.error("Unable to retrieve a connection to DB while authenticating the client for request path: " + 
+                           requestPath, e);
                 String errorMessage = new JSONObject().put("error_description", "Internal Server Error.")
                         .put("error", "server_error").toString();
                 Response response = Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(errorMessage).build();
@@ -104,7 +111,13 @@ public class OAuthClientAuthenticatorProxy extends AbstractPhaseInterceptor<Mess
 
         String requestPath = (String) message.get(Message.REQUEST_URI);
         requestPath = removeTrailingSlash(requestPath);
-        return PROXY_ENDPOINT_LIST.stream().anyMatch(requestPath::equalsIgnoreCase);
+        boolean canHandle = PROXY_ENDPOINT_LIST.stream().anyMatch(requestPath::equalsIgnoreCase);
+        
+        if (log.isDebugEnabled()) {
+            log.debug("OAuth client authenticator proxy canHandle check for path: " + requestPath + 
+                     ", result: " + canHandle);
+        }
+        return canHandle;
     }
 
     /**
@@ -117,16 +130,23 @@ public class OAuthClientAuthenticatorProxy extends AbstractPhaseInterceptor<Mess
 
         Map<String, List> contentMap = new HashMap<>();
         List contentList = message.getContent(List.class);
-        contentList.forEach(item -> {
-            if (item instanceof MetadataMap) {
-                MetadataMap metadataMap = (MetadataMap) item;
-                metadataMap.forEach((key, value) -> {
-                    if (key instanceof String && value instanceof List) {
-                        contentMap.put((String) key, (List) value);
-                    }
-                });
+        if (contentList != null) {
+            if (log.isDebugEnabled()) {
+                log.debug("Processing message content list with " + contentList.size() + " items");
             }
-        });
+            contentList.forEach(item -> {
+                if (item instanceof MetadataMap) {
+                    MetadataMap metadataMap = (MetadataMap) item;
+                    metadataMap.forEach((key, value) -> {
+                        if (key instanceof String && value instanceof List) {
+                            contentMap.put((String) key, (List) value);
+                        }
+                    });
+                }
+            });
+        } else {
+            log.debug("No content list found in the message");
+        }
         return contentMap;
     }
 
@@ -142,6 +162,9 @@ public class OAuthClientAuthenticatorProxy extends AbstractPhaseInterceptor<Mess
     private String removeTrailingSlash(String url) {
 
         if (url != null && url.endsWith(SLASH)) {
+            if (log.isDebugEnabled()) {
+                log.debug("Removing trailing slash from URL: " + url);
+            }
             return url.substring(0, url.length() - 1);
         }
         return url;

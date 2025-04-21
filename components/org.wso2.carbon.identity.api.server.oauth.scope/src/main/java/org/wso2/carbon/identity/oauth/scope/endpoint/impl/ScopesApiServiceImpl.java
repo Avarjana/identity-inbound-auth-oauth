@@ -64,11 +64,15 @@ public class ScopesApiServiceImpl extends ScopesApiService {
 
         Scope registeredScope = null;
         try {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Registering new scope with name: '{}'", scope.getName());
+            }
             validateAddRequest(scope);
             registeredScope = ScopeUtils.getOAuth2ScopeService().registerScope(ScopeUtils.getScope(scope));
         } catch (IdentityOAuth2ScopeClientException e) {
             if (LOG.isDebugEnabled()) {
-                LOG.debug("Client Error while registering scope \n" + scope.toString(), e);
+                LOG.debug("Client Error while registering scope with name: '{}', description: '{}'", 
+                        scope.getName(), scope.getDescription(), e);
             }
             if (Oauth2ScopeConstants.ErrorMessages.ERROR_CODE_CONFLICT_REQUEST_EXISTING_SCOPE.getCode()
                     .equals(e.getErrorCode())) {
@@ -89,6 +93,9 @@ public class ScopesApiServiceImpl extends ScopesApiService {
             ScopeUtils.handleErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
                     Response.Status.INTERNAL_SERVER_ERROR.getReasonPhrase(), throwable, true, LOG);
         }
+        if (LOG.isDebugEnabled() && registeredScope != null) {
+            LOG.debug("Successfully registered new scope with name: '{}'", registeredScope.getName());
+        }
         return Response.status(Response.Status.CREATED).location(buildURIForHeader(scope.getName())).
                 entity(registeredScope).build();
     }
@@ -105,10 +112,13 @@ public class ScopesApiServiceImpl extends ScopesApiService {
         Scope scope = null;
 
         try {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Retrieving scope with name: '{}'", name);
+            }
             scope = ScopeUtils.getOAuth2ScopeService().getScope(name);
         } catch (IdentityOAuth2ScopeClientException e) {
             if (LOG.isDebugEnabled()) {
-                LOG.debug("Client Error while getting scope " + name, e);
+                LOG.debug("Client Error while getting scope with name: '{}'", name, e);
             }
             if (Oauth2ScopeConstants.ErrorMessages.ERROR_CODE_NOT_FOUND_SCOPE.getCode().equals(e.getErrorCode())) {
                 ScopeUtils.handleErrorResponse(Response.Status.NOT_FOUND,
@@ -124,6 +134,9 @@ public class ScopesApiServiceImpl extends ScopesApiService {
         } catch (Throwable throwable) {
             ScopeUtils.handleErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
                     Response.Status.INTERNAL_SERVER_ERROR.getReasonPhrase(), throwable, true, LOG);
+        }
+        if (LOG.isDebugEnabled() && scope != null) {
+            LOG.debug("Successfully retrieved scope with name: '{}'", scope.getName());
         }
         return Response.status(Response.Status.OK).entity(ScopeUtils.getScopeDTO(scope)).build();
     }
@@ -143,6 +156,10 @@ public class ScopesApiServiceImpl extends ScopesApiService {
         Set<Scope> scopes = null;
 
         try {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Retrieving scopes with parameters - startIndex: {}, count: {}, includeOIDCScopes: {}, requestedScopes: {}", 
+                        startIndex, count, includeOIDCScopes, requestedScopes);
+            }
             scopes =
                     ScopeUtils.getOAuth2ScopeService().getScopes(startIndex, count, includeOIDCScopes, requestedScopes);
         } catch (IdentityOAuth2ScopeException e) {
@@ -151,6 +168,9 @@ public class ScopesApiServiceImpl extends ScopesApiService {
         } catch (Throwable throwable) {
             ScopeUtils.handleErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
                     Response.Status.INTERNAL_SERVER_ERROR.getReasonPhrase(), throwable, true, LOG);
+        }
+        if (LOG.isDebugEnabled() && scopes != null) {
+            LOG.debug("Successfully retrieved {} scopes", scopes.size());
         }
         return Response.status(Response.Status.OK).entity(ScopeUtils.getScopeDTOs(scopes)).build();
     }
@@ -180,10 +200,13 @@ public class ScopesApiServiceImpl extends ScopesApiService {
         boolean isScopeExists = false;
 
         try {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Checking if scope with name: '{}' exists", name);
+            }
             isScopeExists = ScopeUtils.getOAuth2ScopeService().isScopeExists(name);
         } catch (IdentityOAuth2ScopeClientException e) {
             if (LOG.isDebugEnabled()) {
-                LOG.debug("Client Error while getting scope existence of scope name " + name, e);
+                LOG.debug("Client Error while checking existence of scope with name: '{}'", name, e);
             }
             ScopeUtils.handleErrorResponse(Response.Status.BAD_REQUEST,
                     Response.Status.BAD_REQUEST.getReasonPhrase(), e, false, LOG);
@@ -196,6 +219,9 @@ public class ScopesApiServiceImpl extends ScopesApiService {
                     Response.Status.INTERNAL_SERVER_ERROR.getReasonPhrase(), throwable, true, LOG);
         }
 
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Scope existence check for '{}' returned: {}", name, isScopeExists);
+        }
         if (isScopeExists) {
             return Response.status(Response.Status.OK).build();
         }
@@ -214,12 +240,16 @@ public class ScopesApiServiceImpl extends ScopesApiService {
 
         ScopeDTO updatedScope = null;
         try {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Updating scope with name: '{}'", name);
+            }
             validateUpdateRequest(name);
             updatedScope = ScopeUtils.getScopeDTO(ScopeUtils.getOAuth2ScopeService()
                     .updateScope(ScopeUtils.getUpdatedScope(scope, name)));
         } catch (IdentityOAuth2ScopeClientException e) {
             if (LOG.isDebugEnabled()) {
-                LOG.debug("Client Error while updating scope \n" + scope.toString(), e);
+                LOG.debug("Client Error while updating scope with name: '{}', display name: '{}'", 
+                        name, scope.getDisplayName(), e);
             }
             if (Oauth2ScopeConstants.ErrorMessages.ERROR_CODE_NOT_FOUND_SCOPE.getCode()
                     .equals(e.getErrorCode())) {
@@ -240,6 +270,9 @@ public class ScopesApiServiceImpl extends ScopesApiService {
             ScopeUtils.handleErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
                     Response.Status.INTERNAL_SERVER_ERROR.getReasonPhrase(), throwable, true, LOG);
         }
+        if (LOG.isDebugEnabled() && updatedScope != null) {
+            LOG.debug("Successfully updated scope with name: '{}'", updatedScope.getName());
+        }
         return Response.status(Response.Status.OK).entity(updatedScope).build();
     }
 
@@ -253,11 +286,14 @@ public class ScopesApiServiceImpl extends ScopesApiService {
     public Response deleteScope(String name) {
 
         try {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Deleting scope with name: '{}'", name);
+            }
             validateDeleteRequest(name);
             ScopeUtils.getOAuth2ScopeService().deleteScope(name);
         } catch (IdentityOAuth2ScopeClientException e) {
             if (LOG.isDebugEnabled()) {
-                LOG.debug("Client Error while deleting scope " + name, e);
+                LOG.debug("Client Error while deleting scope with name: '{}'", name, e);
             }
             if (Oauth2ScopeConstants.ErrorMessages.ERROR_CODE_NOT_FOUND_SCOPE.getCode()
                     .equals(e.getErrorCode())) {
@@ -278,6 +314,9 @@ public class ScopesApiServiceImpl extends ScopesApiService {
             ScopeUtils.handleErrorResponse(Response.Status.INTERNAL_SERVER_ERROR,
                     Response.Status.INTERNAL_SERVER_ERROR.getReasonPhrase(), throwable, true, LOG);
         }
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Successfully deleted scope with name: '{}'", name);
+        }
         return Response.status(Response.Status.OK).build();
     }
 
@@ -291,13 +330,22 @@ public class ScopesApiServiceImpl extends ScopesApiService {
     private static URI buildURIForHeader(String scopeName) {
 
         URI location;
-        String context = IdentityTenantUtil.isTenantQualifiedUrlsEnabled() ? SERVER_API_PATH_COMPONENT + scopeName :
+        boolean isTenantQualifiedUrlsEnabled = IdentityTenantUtil.isTenantQualifiedUrlsEnabled();
+        String context = isTenantQualifiedUrlsEnabled ? SERVER_API_PATH_COMPONENT + scopeName :
                 String.format(TENANT_CONTEXT_PATH_COMPONENT, getTenantDomainFromContext()) + SERVER_API_PATH_COMPONENT
                         + scopeName;
         try {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Building URI for scope '{}' with tenant qualified URLs enabled: {}", 
+                        scopeName, isTenantQualifiedUrlsEnabled);
+            }
             String url = ServiceURLBuilder.create().addPath(context).build().getAbsolutePublicURL();
             location = URI.create(url);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Built URI location for scope '{}': {}", scopeName, location);
+            }
         } catch (URLBuilderException e) {
+            LOG.error("Error occurred while building URL in tenant qualified mode for scope: '{}'", scopeName, e);
             throw new RuntimeException("Error occurred while building URL in tenant qualified mode.", e);
         }
         return location;
@@ -321,8 +369,13 @@ public class ScopesApiServiceImpl extends ScopesApiService {
 
         if (scope.getName() != null && scope.getName().startsWith(INTERNAL_SCOPE_PREFIX)) {
             String authenticatedUser = PrivilegedCarbonContext.getThreadLocalCarbonContext().getUsername();
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Validating authorization for user '{}' to add internal scope '{}'", 
+                        authenticatedUser, scope.getName());
+            }
             boolean userAuthorized = isUserAuthorized(authenticatedUser);
             if (!userAuthorized) {
+                LOG.warn("User '{}' not authorized to add internal scope '{}'", authenticatedUser, scope.getName());
                 throw new IdentityOAuth2ScopeClientException(
                         Oauth2ScopeConstants.ErrorMessages.ERROR_CODE_NOT_AUTHORIZED_ADD_INTERNAL_SCOPE.getCode(),
                         String.format(Oauth2ScopeConstants.ErrorMessages.ERROR_CODE_NOT_AUTHORIZED_ADD_INTERNAL_SCOPE
@@ -335,8 +388,13 @@ public class ScopesApiServiceImpl extends ScopesApiService {
 
         if (scopeName != null && scopeName.startsWith(INTERNAL_SCOPE_PREFIX)) {
             String authenticatedUser = PrivilegedCarbonContext.getThreadLocalCarbonContext().getUsername();
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Validating authorization for user '{}' to update internal scope '{}'", 
+                        authenticatedUser, scopeName);
+            }
             boolean userAuthorized = isUserAuthorized(authenticatedUser);
             if (!userAuthorized) {
+                LOG.warn("User '{}' not authorized to update internal scope '{}'", authenticatedUser, scopeName);
                 throw new IdentityOAuth2ScopeClientException(
                         Oauth2ScopeConstants.ErrorMessages.ERROR_CODE_NOT_AUTHORIZED_UPDATE_INTERNAL_SCOPE.getCode(),
                         String.format(Oauth2ScopeConstants.ErrorMessages.ERROR_CODE_NOT_AUTHORIZED_UPDATE_INTERNAL_SCOPE
@@ -349,8 +407,13 @@ public class ScopesApiServiceImpl extends ScopesApiService {
 
         if (scopeName != null && scopeName.startsWith(INTERNAL_SCOPE_PREFIX)) {
             String authenticatedUser = PrivilegedCarbonContext.getThreadLocalCarbonContext().getUsername();
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Validating authorization for user '{}' to delete internal scope '{}'", 
+                        authenticatedUser, scopeName);
+            }
             boolean userAuthorized = isUserAuthorized(authenticatedUser);
             if (!userAuthorized) {
+                LOG.warn("User '{}' not authorized to delete internal scope '{}'", authenticatedUser, scopeName);
                 throw new IdentityOAuth2ScopeClientException(
                         Oauth2ScopeConstants.ErrorMessages.ERROR_CODE_NOT_AUTHORIZED_DELETE_INTERNAL_SCOPE.getCode(),
                         String.format(Oauth2ScopeConstants.ErrorMessages.ERROR_CODE_NOT_AUTHORIZED_DELETE_INTERNAL_SCOPE
@@ -364,10 +427,15 @@ public class ScopesApiServiceImpl extends ScopesApiService {
         try {
             AuthorizationManager authorizationManager =
                     CarbonContext.getThreadLocalCarbonContext().getUserRealm().getAuthorizationManager();
-            return authorizationManager.isUserAuthorized(authenticatedUser,
+            boolean isAuthorized = authorizationManager.isUserAuthorized(authenticatedUser,
                     CarbonConstants.UI_ADMIN_PERMISSION_COLLECTION, CarbonConstants.UI_PERMISSION_ACTION);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("User authorization check for '{}' with permission '{}' returned: {}", 
+                        authenticatedUser, CarbonConstants.UI_ADMIN_PERMISSION_COLLECTION, isAuthorized);
+            }
+            return isAuthorized;
         } catch (UserStoreException e) {
-            LOG.error("Error while validating user authorization of user: " + authenticatedUser, e);
+            LOG.error("Error while validating authorization for user: '{}'", authenticatedUser, e);
         }
         return false;
     }

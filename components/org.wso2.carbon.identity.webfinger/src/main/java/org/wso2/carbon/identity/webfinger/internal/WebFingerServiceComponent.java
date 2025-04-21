@@ -47,27 +47,38 @@ public class WebFingerServiceComponent {
 
     protected void activate(ComponentContext context) {
         try {
+            log.info("Activating WebFinger service component");
             BundleContext bundleContext = context.getBundleContext();
             WebFingerProcessor webFingerProcessor = DefaultWebFingerProcessor.getInstance();
             bundleContext.registerService(WebFingerProcessor.class.getName(), webFingerProcessor, null);
             WebFingerServiceComponentHolder.setWebFingerProcessor(webFingerProcessor);
             if (log.isDebugEnabled()) {
-                log.debug("OpenID WebFinger bundle is activated.");
+                log.debug("WebFinger processor service registered successfully");
             }
 
             // Register OpenID Connect WebFinger servlet
             HttpService httpService = WebFingerServiceComponentHolder.getHttpService();
-            Servlet webFingerServlet = new ContextPathServletAdaptor(new WebFingerServlet(),
-                    "/.well-known/webfinger");
+            if (httpService == null) {
+                log.error("HTTP service is not available for registering WebFinger servlet");
+                return;
+            }
+            
+            String servletPath = "/.well-known/webfinger";
+            if (log.isDebugEnabled()) {
+                log.debug("Registering WebFinger servlet at path: {}", servletPath);
+            }
+            
+            Servlet webFingerServlet = new ContextPathServletAdaptor(new WebFingerServlet(), servletPath);
             try {
-                httpService.registerServlet("/.well-known/webfinger", webFingerServlet, null, null);
+                httpService.registerServlet(servletPath, webFingerServlet, null, null);
+                log.info("WebFinger servlet registered successfully at path: {}", servletPath);
             } catch (Exception e) {
-                String errMsg = "Error when registering Web Finger Servlet via the HttpService.";
-                log.error(errMsg, e);
+                String errMsg = "Error when registering WebFinger Servlet via the HttpService";
+                log.error("{}: {}", errMsg, e.getMessage(), e);
                 throw new RuntimeException(errMsg, e);
             }
         } catch (Throwable e) {
-            log.error("Error while activating the WebFingerServiceComponent", e);
+            log.error("Error while activating the WebFingerServiceComponent: {}", e.getMessage(), e);
         }
     }
 
@@ -80,14 +91,14 @@ public class WebFingerServiceComponent {
     )
     protected void setRealmService(RealmService realmService) {
         if (log.isDebugEnabled()) {
-            log.info("Setting the Realm Service");
+            log.debug("Setting the Realm Service for WebFinger component");
         }
         WebFingerServiceComponentHolder.setRealmService(realmService);
     }
 
     protected void unsetRealmService(RealmService realmService) {
         if (log.isDebugEnabled()) {
-            log.info("Unsetting the Realm Service");
+            log.debug("Unsetting the Realm Service from WebFinger component");
         }
         WebFingerServiceComponentHolder.setRealmService(null);
     }
@@ -101,14 +112,14 @@ public class WebFingerServiceComponent {
     )
     protected void setHttpService(HttpService httpService) {
         if (log.isDebugEnabled()) {
-            log.debug("HTTP Service is set in the OpenID Connect WebFinger bundle");
+            log.debug("HTTP Service is set in the WebFinger component");
         }
         WebFingerServiceComponentHolder.setHttpService(httpService);
     }
 
     protected void unsetHttpService(HttpService httpService) {
         if (log.isDebugEnabled()) {
-            log.debug("HTTP Service is unset in the OpenID Connect WebFinger bundle");
+            log.debug("HTTP Service is unset in the WebFinger component");
         }
         WebFingerServiceComponentHolder.setHttpService(null);
     }

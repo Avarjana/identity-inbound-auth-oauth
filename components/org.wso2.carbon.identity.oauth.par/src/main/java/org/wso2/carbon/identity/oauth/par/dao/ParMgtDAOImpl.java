@@ -21,6 +21,8 @@ package org.wso2.carbon.identity.oauth.par.dao;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.wso2.carbon.identity.core.util.IdentityDatabaseUtil;
 import org.wso2.carbon.identity.oauth.par.common.ParConstants;
 import org.wso2.carbon.identity.oauth.par.common.SQLQueries;
@@ -39,12 +41,17 @@ import java.util.Optional;
  */
 public class ParMgtDAOImpl implements ParMgtDAO {
 
+    private static final Log log = LogFactory.getLog(ParMgtDAOImpl.class);
+
     @Override
     public void persistRequestData(String requestURIReference, String clientId, long expiresIn,
                                    Map<String, String> parameters) throws ParCoreException {
 
-        try (Connection connection = IdentityDatabaseUtil.getDBConnection(true)) {
+        if (log.isDebugEnabled()) {
+            log.debug("Persisting PAR request with reference: {} for client: {}", requestURIReference, clientId);
+        }
 
+        try (Connection connection = IdentityDatabaseUtil.getDBConnection(true)) {
             try (PreparedStatement prepStmt = connection.prepareStatement(SQLQueries.
                     ParSQLQueries.STORE_PAR_REQUEST)) {
 
@@ -55,14 +62,25 @@ public class ParMgtDAOImpl implements ParMgtDAO {
 
                 prepStmt.execute();
                 IdentityDatabaseUtil.commitTransaction(connection);
+                
+                if (log.isDebugEnabled()) {
+                    log.debug("Successfully persisted PAR request with reference: {} for client: {}", 
+                            requestURIReference, clientId);
+                }
             }
         } catch (SQLException e) {
+            log.error("Error occurred while persisting PAR request with reference: {} for client: {}", 
+                    requestURIReference, clientId, e);
             throw new ParCoreException("Error occurred in persisting PAR request.", e);
         }
     }
 
     @Override
     public Optional<ParRequestDO> getRequestData(String requestURIReference) throws ParCoreException {
+
+        if (log.isDebugEnabled()) {
+            log.debug("Retrieving PAR request data for reference: {}", requestURIReference);
+        }
 
         try (Connection connection = IdentityDatabaseUtil.getDBConnection(false);
              PreparedStatement prepStmt = connection.prepareStatement(SQLQueries
@@ -76,12 +94,21 @@ public class ParMgtDAOImpl implements ParMgtDAO {
                     long scheduledExpiry = resultSet.getLong(ParConstants.COL_LBL_SCHEDULED_EXPIRY);
                     String clientId = resultSet.getString(ParConstants.COL_LBL_CLIENT_ID);
 
-                    return Optional.of(new ParRequestDO(getDeserializedParams(jsonParams), scheduledExpiry, clientId));
+                    if (log.isDebugEnabled()) {
+                        log.debug("Found PAR request with reference: {} for client: {}", requestURIReference, clientId);
+                    }
 
+                    return Optional.of(new ParRequestDO(getDeserializedParams(jsonParams), scheduledExpiry, clientId));
+                }
+                
+                if (log.isDebugEnabled()) {
+                    log.debug("No PAR request found for reference: {}", requestURIReference);
                 }
                 return Optional.empty();
             }
         } catch (SQLException e) {
+            log.error("Error occurred while retrieving PAR request with reference: {} from the database", 
+                    requestURIReference, e);
             throw new ParCoreException("Error occurred while retrieving PAR request from the database.", e);
         }
     }
@@ -89,13 +116,24 @@ public class ParMgtDAOImpl implements ParMgtDAO {
     @Override
     public void removeRequestData(String requestURIReference) throws ParCoreException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Removing PAR request data for reference: {}", requestURIReference);
+        }
+
         try (Connection connection = IdentityDatabaseUtil.getDBConnection(true);
              PreparedStatement prepStmt = connection.prepareStatement(SQLQueries
                      .ParSQLQueries.REMOVE_PAR_REQUEST)) {
             prepStmt.setString(1, requestURIReference);
-            prepStmt.execute();
+            int rowsAffected = prepStmt.executeUpdate();
             IdentityDatabaseUtil.commitTransaction(connection);
+            
+            if (log.isDebugEnabled()) {
+                log.debug("Successfully removed PAR request with reference: {}. Rows affected: {}", 
+                        requestURIReference, rowsAffected);
+            }
         } catch (SQLException e) {
+            log.error("Error occurred while removing PAR request with reference: {} from the database", 
+                    requestURIReference, e);
             throw new ParCoreException("Error occurred while clearing PAR request from Database", e);
         }
     }
@@ -103,8 +141,13 @@ public class ParMgtDAOImpl implements ParMgtDAO {
     private String getSerializedParams(Map<String, String> params) throws ParCoreException {
 
         try {
-            return new ObjectMapper().writeValueAsString(params);
+            String serialized = new ObjectMapper().writeValueAsString(params);
+            if (log.isDebugEnabled()) {
+                log.debug("Successfully serialized parameter map to JSON");
+            }
+            return serialized;
         } catch (JsonProcessingException e) {
+            log.error("Error occurred while serializing parameter map to JSON", e);
             throw new ParCoreException("Error occurred while serializing parameter map to JSON", e);
         }
     }
@@ -112,8 +155,14 @@ public class ParMgtDAOImpl implements ParMgtDAO {
     private Map<String, String> getDeserializedParams(String jsonParams) throws ParCoreException {
 
         try {
-            return new ObjectMapper().readValue(jsonParams, new TypeReference<Map<String, String>>() { });
+            Map<String, String> deserialized = new ObjectMapper().readValue(jsonParams, 
+                    new TypeReference<Map<String, String>>() { });
+            if (log.isDebugEnabled()) {
+                log.debug("Successfully deserialized JSON to parameter map");
+            }
+            return deserialized;
         } catch (JsonProcessingException e) {
+            log.error("Error occurred while deserializing JSON string to map", e);
             throw new ParCoreException("Error occurred while serializing JSON string map to Map", e);
         }
     }

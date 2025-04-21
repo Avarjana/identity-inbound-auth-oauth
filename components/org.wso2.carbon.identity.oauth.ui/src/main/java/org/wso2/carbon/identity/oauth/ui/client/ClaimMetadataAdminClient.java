@@ -68,12 +68,16 @@ public class ClaimMetadataAdminClient {
             ClaimMetadataManagementServiceClaimMetadataException {
 
         try {
+            if (log.isDebugEnabled()) {
+                log.debug("Retrieving external claims for dialect: {}", externalClaimDialect);
+            }
             return stub.getExternalClaims(externalClaimDialect);
         } catch (RemoteException e) {
-            log.error(e.getMessage(), e);
+            log.error("Error while retrieving external claims for dialect: {}", externalClaimDialect, e);
             throw e;
         } catch (ClaimMetadataManagementServiceClaimMetadataException e) {
-            log.error(e.getMessage(), e);
+            log.error("Claim metadata exception while retrieving external claims for dialect: {}", 
+                    externalClaimDialect, e);
             throw e;
         }
     }

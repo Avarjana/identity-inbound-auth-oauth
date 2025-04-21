@@ -51,6 +51,9 @@ public class UserInfoJWTResponse extends AbstractUserInfoResponseBuilder {
     protected Map<String, Object> retrieveUserClaims(OAuth2TokenValidationResponseDTO tokenValidationResponse)
             throws UserInfoEndpointException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Retrieving user claims for user: {}", tokenValidationResponse.getAuthorizedUser());
+        }
         return ClaimUtil.getUserClaimsUsingTokenResponse(tokenValidationResponse);
     }
 
@@ -73,7 +76,8 @@ public class UserInfoJWTResponse extends AbstractUserInfoResponseBuilder {
         JWSAlgorithm signatureAlgorithm = getJWTSignatureAlgorithm();
         if (JWSAlgorithm.NONE.equals(signatureAlgorithm)) {
             if (log.isDebugEnabled()) {
-                log.debug("User Info JWT Signature algorithm is not defined. Returning unsigned JWT.");
+                log.debug("User Info JWT Signature algorithm is not defined. Returning unsigned JWT for user: {}", 
+                        tokenResponse.getAuthorizedUser());
             }
             return new PlainJWT(jwtClaimsSet).serialize();
         }
@@ -81,8 +85,13 @@ public class UserInfoJWTResponse extends AbstractUserInfoResponseBuilder {
         // Tenant domain to which the signing key belongs to.
         String signingTenantDomain = getSigningTenantDomain(tokenResponse, spTenantDomain);
         try {
+            if (log.isDebugEnabled()) {
+                log.debug("Signing JWT using algorithm: {} for tenant: {}", 
+                        signatureAlgorithm.getName(), signingTenantDomain);
+            }
             return OAuth2Util.signJWT(jwtClaimsSet, signatureAlgorithm, signingTenantDomain).serialize();
         } catch (IdentityOAuth2Exception e) {
+            log.error("Error occurred while signing UserInfo JWT: {}", e.getMessage(), e);
             throw new UserInfoEndpointException("Error occurred while signing JWT", e);
         }
     }
@@ -94,7 +103,12 @@ public class UserInfoJWTResponse extends AbstractUserInfoResponseBuilder {
         if (isNotBlank(sigAlg)) {
             try {
                 signatureAlgorithm = OAuth2Util.mapSignatureAlgorithmForJWSAlgorithm(sigAlg);
+                if (log.isDebugEnabled()) {
+                    log.debug("Mapped signature algorithm '{}' to JWS algorithm '{}'", 
+                            sigAlg, signatureAlgorithm.getName());
+                }
             } catch (IdentityOAuth2Exception e) {
+                log.error("Unsupported signature algorithm provided for UserInfo JWT: {}", sigAlg, e);
                 throw new UserInfoEndpointException("Provided signature algorithm : " + sigAlg +
                         " is not supported.", e);
             }
@@ -133,6 +147,7 @@ public class UserInfoJWTResponse extends AbstractUserInfoResponseBuilder {
         if (accessTokenDO.getAuthzUser() != null) {
             return accessTokenDO.getAuthzUser().getTenantDomain();
         } else {
+            log.error("Authorized user not found in the access token when retrieving tenant domain for UserInfo JWT signing");
             throw new UserInfoEndpointException("Authorized user was not found in the access token DO when " +
                     "retrieving the tenant domain.");
         }

@@ -19,6 +19,8 @@ package org.wso2.carbon.identity.oauth2.dcr.endpoint.exmapper;
 import com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.wso2.carbon.identity.oauth.dcr.DCRMConstants;
 import org.wso2.carbon.identity.oauth2.dcr.endpoint.dto.ErrorDTO;
 
@@ -34,6 +36,7 @@ import javax.ws.rs.ext.ExceptionMapper;
 public class JsonProcessingExceptionMapper implements ExceptionMapper<UnrecognizedPropertyException> {
 
     private static final Log log = LogFactory.getLog(JsonProcessingExceptionMapper.class);
+    private static final Logger LOGGER = LogManager.getLogger(JsonProcessingExceptionMapper.class);
 
     @Override
     public Response toResponse(UnrecognizedPropertyException e) {
@@ -42,6 +45,9 @@ public class JsonProcessingExceptionMapper implements ExceptionMapper<Unrecogniz
             log.debug("Provided JSON request content is not in the valid format:", e);
         }
 
+        // Log the exception with Log4j
+        LOGGER.error("Invalid DCR request received with unrecognized field: {}", e.getPropertyName());
+        
         ErrorDTO errorDTO = new ErrorDTO();
         String error = DCRMConstants.ErrorCodes.INVALID_CLIENT_METADATA;
         errorDTO.setError(error);

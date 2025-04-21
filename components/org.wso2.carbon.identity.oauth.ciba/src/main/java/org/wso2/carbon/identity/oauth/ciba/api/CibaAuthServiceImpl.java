@@ -50,8 +50,12 @@ public class CibaAuthServiceImpl implements CibaAuthService {
     public CibaAuthCodeResponse generateAuthCodeResponse(CibaAuthCodeRequest cibaAuthCodeRequest)
             throws CibaCoreException, CibaClientException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Generating auth code response for client: {}", cibaAuthCodeRequest.getIssuer());
+        }
         CibaAuthCodeDO cibaAuthCodeDO = generateCibaAuthCodeDO(cibaAuthCodeRequest);
         CibaDAOFactory.getInstance().getCibaAuthMgtDAO().persistCibaAuthCode(cibaAuthCodeDO);
+        log.info("Successfully persisted CIBA auth code for client: {}", cibaAuthCodeRequest.getIssuer());
         return buildAuthCodeResponse(cibaAuthCodeRequest, cibaAuthCodeDO);
     }
 
@@ -90,9 +94,8 @@ public class CibaAuthServiceImpl implements CibaAuthService {
             return requestedExpiry;
         }
         if (log.isDebugEnabled()) {
-            log.debug("The requested_expiry: " + requestedExpiry + " exceeds default maximum value: " +
-                    CibaConstants.MAXIMUM_REQUESTED_EXPIRY_IN_SEC + " for the CIBA authentication request made " +
-                    "by: " + cibaAuthCodeRequest.getIssuer());
+            log.debug("The requested_expiry: {} exceeds default maximum value: {} for the CIBA authentication request made by: {}", 
+                    requestedExpiry, CibaConstants.MAXIMUM_REQUESTED_EXPIRY_IN_SEC, cibaAuthCodeRequest.getIssuer());
         }
         return CibaConstants.MAXIMUM_REQUESTED_EXPIRY_IN_SEC;
     }
@@ -154,12 +157,14 @@ public class CibaAuthServiceImpl implements CibaAuthService {
                 cibaAuthCodeResponse.setTransactionDetails(cibaAuthCodeRequest.getTransactionContext());
             }
             if (log.isDebugEnabled()) {
-                log.debug("Successful in creating AuthCodeResponse for the client: " + clientID);
+                log.debug("Successful in creating AuthCodeResponse for the client: {}", clientID);
             }
             return cibaAuthCodeResponse;
         } catch (IdentityOAuth2Exception e) {
+            log.error("Error in creating AuthCodeResponse for the client: {}", clientID, e);
             throw new CibaCoreException("Error in creating AuthCodeResponse for the client: " + clientID, e);
         } catch (InvalidOAuthClientException e) {
+            log.error("Invalid OAuth client when creating AuthCodeResponse for the client: {}", clientID, e);
             throw new CibaClientException("Error in creating AuthCodeResponse for the client: " + clientID, e);
         }
     }

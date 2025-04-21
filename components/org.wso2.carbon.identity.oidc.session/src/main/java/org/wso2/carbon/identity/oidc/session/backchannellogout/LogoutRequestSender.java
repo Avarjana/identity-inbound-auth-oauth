@@ -169,7 +169,7 @@ public class LogoutRequestSender {
         if (opbsCookie != null) {
             sendLogoutRequests(opbsCookie.getValue());
         } else {
-            LOG.error("No opbscookie exists in the request");
+            LOG.error("No OPBS cookie exists in the request. Back-channel logout cannot proceed.");
         }
     }
 
@@ -202,7 +202,9 @@ public class LogoutRequestSender {
             for (Map.Entry<String, String> logoutTokenMap : logoutTokenList.entrySet()) {
                 String logoutToken = logoutTokenMap.getKey();
                 String bcLogoutUrl = logoutTokenMap.getValue();
-                LOG.debug("A LogoutReqSenderTask will be assigned to the thread pool.");
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("LogoutReqSenderTask for back-channel URL '" + bcLogoutUrl + "' is being assigned to the thread pool.");
+                }
                 threadPool.submit(new LogoutReqSenderTask(logoutToken, bcLogoutUrl));
             }
         }
@@ -221,7 +223,7 @@ public class LogoutRequestSender {
             DefaultLogoutTokenBuilder logoutTokenBuilder = new DefaultLogoutTokenBuilder();
             logoutTokenList = logoutTokenBuilder.buildLogoutToken(opbsCookie, tenantDomain);
         } catch (IdentityOAuth2Exception e) {
-            LOG.error("Error while initializing " + DefaultLogoutTokenBuilder.class, e);
+            LOG.error("Error while initializing DefaultLogoutTokenBuilder for back-channel logout", e);
         } catch (InvalidOAuthClientException e) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Error while obtaining logout token list for the obpsCookie: " + opbsCookie +
@@ -278,18 +280,25 @@ public class LogoutRequestSender {
 
                 HttpResponse response = httpClient.execute(httpPost);
                 if (LOG.isDebugEnabled()) {
-                    LOG.debug("Backchannel logout response: " + response.getStatusLine());
+                    LOG.debug("Backchannel logout response from " + backChannelLogouturl + ": " + response.getStatusLine());
+                }
+                // For successful responses, log at INFO level for audit purposes
+                int statusCode = response.getStatusLine().getStatusCode();
+                if (statusCode >= 200 && statusCode < 300) {
+                    LOG.info("Successfully sent back-channel logout request to: " + backChannelLogouturl);
+                } else if (statusCode >= 400) {
+                    LOG.warn("Back-channel logout request to " + backChannelLogouturl + " failed with status: " + statusCode);
                 }
             } catch (SocketTimeoutException e) {
-                LOG.error("Timeout occurred while sending logout requests to: " + backChannelLogouturl);
+                LOG.error("Timeout occurred while sending back-channel logout requests to: " + backChannelLogouturl);
             } catch (IOException e) {
-                LOG.error("Error sending logout requests to: " + backChannelLogouturl, e);
+                LOG.error("Error sending back-channel logout requests to: " + backChannelLogouturl, e);
             } finally {
                 if (httpClient != null) {
                     try {
                         httpClient.close();
                     } catch (IOException e) {
-                        LOG.error("Error closing http client.", e);
+                        LOG.error("Error closing HTTP client after sending back-channel logout request", e);
                     }
                 }
             }

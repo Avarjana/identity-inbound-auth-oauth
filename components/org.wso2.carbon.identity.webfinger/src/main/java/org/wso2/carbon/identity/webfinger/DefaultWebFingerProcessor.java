@@ -47,36 +47,49 @@ public class DefaultWebFingerProcessor implements WebFingerProcessor {
 
     public WebFingerResponse getResponse(HttpServletRequest request) throws WebFingerEndpointException,
             ServerConfigurationException {
+        if (log.isDebugEnabled()) {
+            log.debug("Building WebFinger request object from HTTP request");
+        }
         WebFingerRequestBuilder requestBuilder = new DefaultWebFingerRequestBuilder();
         WebFingerRequest requestObject = requestBuilder.buildRequest(request);
+        
+        if (log.isDebugEnabled()) {
+            log.debug("WebFinger request built successfully for resource: {}", requestObject.getResource());
+        }
+        
         WebFingerOIDCResponseBuilder responseBuilder = new WebFingerOIDCResponseBuilder();
-        return responseBuilder.buildWebFingerResponse(requestObject);
+        WebFingerResponse response = responseBuilder.buildWebFingerResponse(requestObject);
+        
+        if (log.isDebugEnabled()) {
+            log.debug("WebFinger response built successfully for resource: {}", requestObject.getResource());
+        }
+        
+        return response;
     }
 
     public int handleError(WebFingerEndpointException error) {
         String errorCode = error.getErrorCode();
         if (WebFingerConstants.ERROR_CODE_INVALID_REQUEST.equals(errorCode)) {
             if (log.isDebugEnabled()) {
-                log.debug(error);
+                log.debug("Invalid WebFinger request: {}", error.getMessage());
             }
             return HttpServletResponse.SC_BAD_REQUEST;
         } else if (WebFingerConstants.ERROR_CODE_INVALID_RESOURCE.equals(errorCode)) {
             if (log.isDebugEnabled()) {
-                log.debug(error);
+                log.debug("Invalid resource in WebFinger request: {}", error.getMessage());
             }
             return HttpServletResponse.SC_NOT_FOUND;
         } else if (WebFingerConstants.ERROR_CODE_JSON_EXCEPTION.equals(errorCode)) {
             if (log.isDebugEnabled()) {
-                log.debug(error);
+                log.debug("JSON processing error in WebFinger request: {}", error.getMessage());
             }
             return HttpServletResponse.SC_UNSUPPORTED_MEDIA_TYPE;
         } else if (WebFingerConstants.ERROR_CODE_NO_WEBFINGER_CONFIG.equals(errorCode)) {
-            log.error(WebFingerConstants.ERROR_MESSAGE_NO_WEBFINGER_CONFIG, error);
+            log.error("WebFinger configuration not found: {}", error.getMessage(), error);
             return HttpServletResponse.SC_NOT_FOUND;
         } else {
-            log.error("Internal server error occured. ", error);
+            log.error("Internal server error occurred while processing WebFinger request: {}", error.getMessage(), error);
             return HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
         }
-
     }
 }

@@ -43,7 +43,7 @@ public class OIDCRegistrationHandler extends RegistrationHandler {
     public IdentityResponse.IdentityResponseBuilder handle(DCRMessageContext dcrMessageContext) throws DCRException {
 
         if (log.isDebugEnabled()) {
-            log.debug("Request processing started by RegistrationRequestProcessor.");
+            log.debug("OIDC registration request processing started");
         }
         RegistrationResponse.DCRRegisterResponseBuilder dcrRegisterResponseBuilder;
 
@@ -51,16 +51,27 @@ public class OIDCRegistrationHandler extends RegistrationHandler {
         if (dcrMessageContext.getIdentityRequest() instanceof RegistrationRequest) {
             registerRequest = (RegistrationRequest) dcrMessageContext.getIdentityRequest();
         } else {
-            throw new DCRException("Error while retrieving the registration request.");
+            String errorMsg = "Invalid registration request type received";
+            log.error(errorMsg);
+            throw new DCRException(errorMsg);
         }
         RegistrationRequestProfile registrationRequestProfile = registerRequest.getRegistrationRequestProfile();
         registrationRequestProfile.setTenantDomain(registerRequest.getTenantDomain());
 
+        if (log.isDebugEnabled()) {
+            log.debug("Registering OIDC client for tenant domain: {}", registrationRequestProfile.getTenantDomain());
+        }
+        
         RegistrationResponseProfile registrationResponseProfile =
                 DCRManagementService.getInstance().registerOAuthApplication(registrationRequestProfile);
 
         dcrRegisterResponseBuilder = new RegistrationResponse.DCRRegisterResponseBuilder();
         dcrRegisterResponseBuilder.setRegistrationResponseProfile(registrationResponseProfile);
+        
+        if (log.isDebugEnabled()) {
+            log.debug("OIDC client registration completed successfully for client: {}", 
+                    registrationResponseProfile.getClientName());
+        }
 
         return dcrRegisterResponseBuilder;
     }

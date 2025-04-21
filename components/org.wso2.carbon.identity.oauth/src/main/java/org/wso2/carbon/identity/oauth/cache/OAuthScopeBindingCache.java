@@ -59,7 +59,7 @@ public class OAuthScopeBindingCache extends BaseCache<OAuthScopeBindingCacheKey,
 
         super.addToCache(key, entry, tenantId);
         if (log.isDebugEnabled()) {
-            log.debug("Scope bindings are added to the cache. \n" + ArrayUtils.toString(entry));
+            log.debug("Scope bindings are added to the cache. \n{}", ArrayUtils.toString(entry));
         }
     }
 
@@ -74,7 +74,7 @@ public class OAuthScopeBindingCache extends BaseCache<OAuthScopeBindingCacheKey,
 
         Scope[] entry = super.getValueFromCache(key, tenantId);
         if (log.isDebugEnabled()) {
-            log.debug("Scopes are getting from the cache. \n" + ArrayUtils.toString(entry));
+            log.debug("Scopes are getting from the cache. \n{}", ArrayUtils.toString(entry));
         }
         return entry;
     }
@@ -89,8 +89,7 @@ public class OAuthScopeBindingCache extends BaseCache<OAuthScopeBindingCacheKey,
 
         super.clearCacheEntry(key, tenantId);
         if (log.isDebugEnabled()) {
-            log.debug("Scope bindings type : " + key.getBindingType() + "" +
-                    "is removed from the cache in tenant: " + tenantId);
+            log.debug("Scope bindings type: {} is removed from the cache in tenant: {}", key.getBindingType(), tenantId);
         }
     }
 }

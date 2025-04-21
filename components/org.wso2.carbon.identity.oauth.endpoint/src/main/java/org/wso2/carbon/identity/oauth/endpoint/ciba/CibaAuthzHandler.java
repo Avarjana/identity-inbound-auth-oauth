@@ -57,6 +57,11 @@ public class CibaAuthzHandler {
     public void initiateAuthzRequest(CibaAuthCodeResponse authCodeResponse, @Context HttpServletRequest request,
                                      @Context HttpServletResponse response) throws CibaAuthFailureException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Initiating CIBA authorization request for auth request ID: {}, client ID: {}", 
+                    authCodeResponse.getAuthReqId(), authCodeResponse.getClientId());
+        }
+
         // Add custom parameters to the request by wrapping.
         CibaAuthRequestWrapper cibaAuthRequestWrapper = new CibaAuthRequestWrapper(request);
 
@@ -110,8 +115,13 @@ public class CibaAuthzHandler {
             throws CibaAuthFailureException {
 
         try {
+            if (log.isDebugEnabled()) {
+                log.debug("Firing authorization request for CIBA flow, client ID: {}", 
+                        requestWrapper.getParameter(Constants.CLIENT_ID));
+            }
             authzEndPoint.authorize(requestWrapper, response);
         } catch (URISyntaxException | InvalidRequestParentException e) {
+            log.error("Error when making internal authorization call for CIBA flow: {}", e.getMessage(), e);
             throw new CibaAuthFailureException(OAuth2ErrorCodes.SERVER_ERROR,
                     "Error in making internal authorization call.", e);
         }

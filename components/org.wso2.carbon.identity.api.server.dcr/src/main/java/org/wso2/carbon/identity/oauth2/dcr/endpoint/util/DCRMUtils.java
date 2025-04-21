@@ -19,6 +19,8 @@
 package org.wso2.carbon.identity.oauth2.dcr.endpoint.util;
 
 import org.apache.commons.logging.Log;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.slf4j.MDC;
 import org.wso2.carbon.context.PrivilegedCarbonContext;
 import org.wso2.carbon.identity.oauth.dcr.DCRMConstants;
@@ -40,6 +42,7 @@ import javax.ws.rs.core.Response;
  */
 public class DCRMUtils {
 
+    private static final Logger LOGGER = LogManager.getLogger(DCRMUtils.class);
     private static final String CONFLICT_STATUS = "CONFLICT_";
     private static final String BAD_REQUEST_STATUS = "BAD_REQUEST_";
     private static final String NOT_FOUND_STATUS = "NOT_FOUND_";
@@ -52,7 +55,7 @@ public class DCRMUtils {
     }
 
     public static DCRMService getOAuth2DCRMService() {
-
+        LOGGER.debug("Getting DCRM service instance");
         return OAuth2DCRMServiceHolder.SERVICE;
     }
 
@@ -159,23 +162,38 @@ public class DCRMUtils {
         String errorCode = dcrmException.getErrorCode();
         Response.Status status = Response.Status.INTERNAL_SERVER_ERROR;
         boolean isStatusOnly = true;
+        
         if (errorCode != null) {
             if (errorCode.startsWith(CONFLICT_STATUS)) {
                 status = Response.Status.BAD_REQUEST;
                 isStatusOnly = false;
+                LOGGER.warn("Conflict error in DCR request. ErrorCode: {}, Message: {}", 
+                    errorCode, dcrmException.getMessage());
             } else if (errorCode.startsWith(BAD_REQUEST_STATUS)) {
                 status = Response.Status.BAD_REQUEST;
                 isStatusOnly = false;
+                LOGGER.warn("Bad request error in DCR request. ErrorCode: {}, Message: {}", 
+                    errorCode, dcrmException.getMessage());
             } else if (errorCode.startsWith(NOT_FOUND_STATUS)) {
                 status = Response.Status.UNAUTHORIZED;
+                LOGGER.warn("Resource not found in DCR request. ErrorCode: {}", errorCode);
             } else if (errorCode.startsWith(FORBIDDEN_STATUS)) {
                 status = Response.Status.FORBIDDEN;
+                LOGGER.warn("Access forbidden for DCR request. ErrorCode: {}", errorCode);
             } else if (errorCode.startsWith(DCRMConstants.ErrorCodes.INVALID_CLIENT_METADATA) ||
                     errorCode.startsWith(DCRMConstants.ErrorCodes.INVALID_SOFTWARE_STATEMENT)) {
                 status = Response.Status.BAD_REQUEST;
                 isStatusOnly = false;
+                LOGGER.warn("Invalid metadata in DCR request. ErrorCode: {}, Message: {}", 
+                    errorCode, dcrmException.getMessage());
+            } else {
+                LOGGER.error("Unknown error in DCR request. ErrorCode: {}, Message: {}", 
+                    errorCode, dcrmException.getMessage());
             }
+        } else {
+            LOGGER.error("Error in DCR request with no error code. Message: {}", dcrmException.getMessage());
         }
+        
         throw buildDCRMEndpointException(status, errorCode, dcrmException.getMessage(), isStatusOnly);
     }
 
@@ -200,10 +218,19 @@ public class DCRMUtils {
         if (isServerException) {
             if (throwable == null) {
                 log.error(status.getReasonPhrase());
+                LOGGER.error("DCR server error: {}", status.getReasonPhrase());
             } else {
                 log.error(status.getReasonPhrase(), throwable);
+                LOGGER.error("DCR server error: {}. Error: {}", status.getReasonPhrase(), 
+                    throwable.getMessage(), throwable);
+            }
+        } else {
+            if (throwable != null) {
+                LOGGER.warn("DCR client error: {}. Error: {}", status.getReasonPhrase(), 
+                    throwable.getMessage());
             }
         }
+        
         throw buildDCRMEndpointException(status, errorCode, throwable == null ? "" : throwable.getMessage(),
                 isServerException);
     }
@@ -216,8 +243,12 @@ public class DCRMUtils {
     public static ApplicationDTO getApplicationDTOFromApplication(Application application) {
 
         if (application == null) {
+            LOGGER.debug("Application object is null, cannot convert to ApplicationDTO");
             return null;
         }
+        
+        LOGGER.debug("Converting Application object to ApplicationDTO for client ID: {}", 
+            application.getClientId());
 
         ApplicationDTO applicationDTO = new ApplicationDTO();
         applicationDTO.setClientId(application.getClientId());
@@ -290,20 +321,26 @@ public class DCRMUtils {
                                                                     boolean isStatusOnly) {
 
         if (isStatusOnly) {
+            LOGGER.debug("Building exception with status only: {}", status);
             return new DCRMEndpointException(status);
         } else {
             String error = DCRMConstants.ErrorCodes.INVALID_CLIENT_METADATA;
             if (DCRMConstants.ErrorMessages.BAD_REQUEST_INVALID_REDIRECT_URI.toString().equals(code)) {
                 error = DCRMConstants.ErrorCodes.INVALID_REDIRECT_URI;
             }
-            if (code.equals(DCRMConstants.ErrorCodes.INVALID_SOFTWARE_STATEMENT)) {
+            if (code != null && code.equals(DCRMConstants.ErrorCodes.INVALID_SOFTWARE_STATEMENT)) {
                 error = DCRMConstants.ErrorCodes.INVALID_SOFTWARE_STATEMENT;
             }
 
             ErrorDTO errorDTO = new ErrorDTO();
             errorDTO.setError(error);
             errorDTO.setErrorDescription(description);
-            errorDTO.setRef(getCorrelation());
+            
+            String correlationId = getCorrelation();
+            errorDTO.setRef(correlationId);
+            
+            LOGGER.debug("Building exception with status: {}, error: {}, correlationId: {}", 
+                status, error, correlationId);
             return new DCRMEndpointException(status, errorDTO);
         }
     }

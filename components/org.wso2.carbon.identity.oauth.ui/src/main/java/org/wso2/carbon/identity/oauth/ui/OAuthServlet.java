@@ -91,6 +91,10 @@ public class OAuthServlet extends HttpServlet {
                 oauthToken = token.getOauthToken();
                 oauthTokenSecret = token.getOauthTokenSecret();
                 oauthCallbackConfirmed = "true";
+                if (log.isDebugEnabled()) {
+                    log.debug("Generated OAuth request token for consumer key: " + 
+                            (params.getOauthConsumerKey() != null ? params.getOauthConsumerKey() : "N/A"));
+                }
                 reqToken = OAuthConstants.OAUTH_TOKEN + "=" + Encode.forUriComponent(oauthToken) + "&"
                         + OAuthConstants.OAUTH_TOKEN_SECRET + "=" + Encode.forUriComponent(oauthTokenSecret) + "&"
                         + OAuthConstants.OAUTH_CALLBACK_CONFIRMED + "=" +
@@ -107,6 +111,9 @@ public class OAuthServlet extends HttpServlet {
                 String password = req.getParameter("oauth_user_password");
                 String tokenFromSession = (String) req.getSession().getAttribute("oauth_req_token");
                 if (userName == null || password == null || tokenFromSession == null) {
+                    if (log.isDebugEnabled()) {
+                        log.debug("Redirecting to OAuth login page as required parameters are missing");
+                    }
                     Parameters metadata = client.getScope(params.getOauthToken());
                     req.getSession().setAttribute("oauth_req_token", params.getOauthToken());
                     req.getSession().setAttribute("oauth_scope", metadata.getScope());
@@ -123,6 +130,10 @@ public class OAuthServlet extends HttpServlet {
                 String accessToken = null;
                 PrintWriter out = resp.getWriter();
                 token = client.getAccessToken(params);
+                if (log.isDebugEnabled()) {
+                    log.debug("Generated OAuth access token for consumer key: " + 
+                            (params.getOauthConsumerKey() != null ? params.getOauthConsumerKey() : "N/A"));
+                }
                 accessToken = OAuthConstants.OAUTH_TOKEN + "=" + Encode.forUriComponent(token.getOauthToken()) + "&"
                         + OAuthConstants.OAUTH_TOKEN_SECRET + "=" + Encode.forUriComponent(token.getOauthTokenSecret());
                 out.write(accessToken);
@@ -130,11 +141,11 @@ public class OAuthServlet extends HttpServlet {
                 resp.setStatus(200);
             }
         } catch (OAuthServiceAuthenticationException e) {
-            log.debug(e);
+            log.debug("OAuth authentication failed", e);
             resp.setStatus(401);
             resp.setHeader("WWW-Authenticate", "Basic realm=\"WSO2 IS\"");
         } catch (Exception e) {
-            log.error(e);
+            log.error("Error occurred during OAuth operation for request type: " + requestType, e);
             resp.setStatus(400);
         }
     }
@@ -157,6 +168,11 @@ public class OAuthServlet extends HttpServlet {
             // No Authorization header available.
             authHeader = request.getQueryString();
             splitChar = "&";
+            if (log.isDebugEnabled()) {
+                log.debug("No Authorization header found, using query string parameters");
+            }
+        } else if (log.isDebugEnabled()) {
+            log.debug("Found Authorization header, processing OAuth parameters");
         }
 
         StringBuilder nonAuthParams = new StringBuilder();

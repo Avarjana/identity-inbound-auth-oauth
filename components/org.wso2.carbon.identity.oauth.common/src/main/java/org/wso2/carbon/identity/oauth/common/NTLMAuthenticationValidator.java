@@ -17,6 +17,8 @@
  */
 package org.wso2.carbon.identity.oauth.common;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.oltu.oauth2.common.OAuth;
 import org.apache.oltu.oauth2.common.exception.OAuthProblemException;
 import org.apache.oltu.oauth2.common.validators.AbstractValidator;
@@ -30,15 +32,28 @@ import static org.wso2.carbon.identity.oauth.common.OAuthCommonUtil.validateCont
  */
 public class NTLMAuthenticationValidator extends AbstractValidator<HttpServletRequest> {
 
+    private static final Log log = LogFactory.getLog(NTLMAuthenticationValidator.class);
+
     public NTLMAuthenticationValidator() {
 
         requiredParams.add(OAuth.OAUTH_GRANT_TYPE);
         requiredParams.add(OAuthConstants.WINDOWS_TOKEN);
+        
+        if (log.isDebugEnabled()) {
+            log.debug("Initialized NTLMAuthenticationValidator with required parameters: {} and {}", 
+                    OAuth.OAUTH_GRANT_TYPE, OAuthConstants.WINDOWS_TOKEN);
+        }
     }
 
     @Override
     public void validateContentType(HttpServletRequest request) throws OAuthProblemException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Validating content type for NTLM authentication request");
+        }
         validateContentTypes(request);
+        if (log.isDebugEnabled()) {
+            log.debug("Content type validation successful for NTLM authentication request");
+        }
     }
 }

@@ -200,6 +200,7 @@ public class OAuth2TokenEndpoint {
         try {
             return new CarbonOAuthTokenRequest(httpRequest);
         } catch (OAuthProblemException e) {
+            log.error("Error while creating CarbonOAuthTokenRequest from the request", e);
             return handleInvalidRequest(e);
         }
     }
@@ -209,10 +210,10 @@ public class OAuth2TokenEndpoint {
 
         if (isInvalidRequest(e) || isUnsupportedGrantType(e)) {
             if (log.isDebugEnabled()) {
-                log.debug("Error: " + e.getError() + ", description: " + e.getDescription());
+                log.debug("OAuth token error: {}, description: {}", e.getError(), e.getDescription());
             }
         } else {
-            log.error("Error while creating the Carbon OAuth token request", e);
+            log.error("Error while creating the Carbon OAuth token request: {}", e.getMessage(), e);
         }
         throw new TokenEndpointBadRequestException(e.getDescription(), e);
     }
@@ -231,6 +232,7 @@ public class OAuth2TokenEndpoint {
             throws TokenEndpointBadRequestException {
 
         if (!validateParams(request, paramMap)) {
+            log.warn("Token request contains repeated parameters");
             throw new TokenEndpointBadRequestException("Invalid request with repeated parameters.");
         }
     }
@@ -244,6 +246,7 @@ public class OAuth2TokenEndpoint {
                     .map(param -> param.split("=")[0])
                     .anyMatch(OAuthServerConfiguration.getInstance().getRestrictedQueryParameters()::contains);
             if (containsSensitiveData) {
+                log.warn("Token request contains sensitive data in URL query parameters");
                 throw new TokenEndpointBadRequestException("Invalid request with sensitive data in the URL.");
             }
         }
@@ -351,6 +354,8 @@ public class OAuth2TokenEndpoint {
         if (StringUtils.isBlank(errorMessage)) {
             errorMessage = "Client Authentication failed.";
         }
+        
+        log.warn("Client authentication failed: {}", errorMessage);
 
         OAuthResponse response = OAuthASResponse.errorResponse(HttpServletResponse.SC_UNAUTHORIZED)
                 .setError(OAuth2ErrorCodes.INVALID_CLIENT)
@@ -361,6 +366,8 @@ public class OAuth2TokenEndpoint {
     }
 
     private Response handleServerError() throws OAuthSystemException {
+        
+        log.error("Internal server error occurred during token endpoint processing");
 
         OAuthResponse response = OAuthASResponse.errorResponse(HttpServletResponse.SC_INTERNAL_SERVER_ERROR).
                 setError(OAuth2ErrorCodes.SERVER_ERROR).setErrorDescription("Internal Server Error.")
@@ -372,6 +379,8 @@ public class OAuth2TokenEndpoint {
     }
 
     private Response handleSQLError() throws OAuthSystemException {
+    
+        log.error("Database error occurred during token endpoint processing");
 
         OAuthResponse response = OAuthASResponse.errorResponse(HttpServletResponse.SC_BAD_GATEWAY).
                 setError(OAuth2ErrorCodes.SERVER_ERROR).setErrorDescription("Service Unavailable Error.")
@@ -387,6 +396,12 @@ public class OAuth2TokenEndpoint {
 
         OAuth2AccessTokenReqDTO tokenReqDTO = buildAccessTokenReqDTO(oauthRequest, httpServletRequestWrapper,
                 httpServletResponseWrapper);
+        
+        if (log.isDebugEnabled()) {
+            log.debug("Issuing access token for client ID: {}, grant type: {}", 
+                    tokenReqDTO.getClientId(), tokenReqDTO.getGrantType());
+        }
+        
         return OAuth2ServiceFactory.getOAuth2Service().issueAccessToken(tokenReqDTO);
     }
 

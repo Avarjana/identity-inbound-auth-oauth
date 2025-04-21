@@ -34,6 +34,21 @@ public class JSONResponseBuilder implements WebFingerResponseBuilder {
 
     @Override
     public String getOIDProviderIssuerString(WebFingerResponse webFingerResponse) throws WebFingerEndpointException {
-        return new Gson().toJson(webFingerResponse);
+        if (log.isDebugEnabled()) {
+            log.debug("Building JSON response for WebFinger resource: {}", webFingerResponse.getSubject());
+        }
+        
+        try {
+            String jsonResponse = new Gson().toJson(webFingerResponse);
+            
+            if (log.isDebugEnabled()) {
+                log.debug("Successfully generated JSON response for WebFinger resource: {}", webFingerResponse.getSubject());
+            }
+            
+            return jsonResponse;
+        } catch (Exception e) {
+            log.error("Error while generating JSON response for WebFinger resource: {}", webFingerResponse.getSubject(), e);
+            throw new WebFingerEndpointException("Error while generating JSON response", e);
+        }
     }
 }

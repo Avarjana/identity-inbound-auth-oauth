@@ -43,6 +43,9 @@ public class WebFingerServlet extends HttpServlet {
     @Override
     protected void doGet(HttpServletRequest httpServletRequest,
                          HttpServletResponse httpServletResponse) throws IOException {
+        if (log.isDebugEnabled()) {
+            log.debug("Received WebFinger request from {}", httpServletRequest.getRemoteAddr());
+        }
         getOIDProviderIssuer(httpServletRequest, httpServletResponse);
     }
 
@@ -50,19 +53,33 @@ public class WebFingerServlet extends HttpServlet {
                                      HttpServletResponse httpServletResponse) throws IOException {
         WebFingerProcessor processor = WebFingerServiceComponentHolder.getWebFingerProcessor();
         String response = "";
+        String resource = httpServletRequest.getParameter(WebFingerConstants.RESOURCE);
+        
+        if (log.isDebugEnabled()) {
+            log.debug("Processing WebFinger request for resource: {}", resource);
+        }
+        
         try {
             WebFingerResponseBuilder webFingerResponseBuilder = new JSONResponseBuilder();
             response = webFingerResponseBuilder.getOIDProviderIssuerString(processor.getResponse(httpServletRequest));
+            if (log.isDebugEnabled()) {
+                log.debug("Successfully generated WebFinger response for resource: {}", resource);
+            }
         } catch (WebFingerEndpointException e) {
-            httpServletResponse.setStatus(processor.handleError(e));
+            int statusCode = processor.handleError(e);
+            log.warn("WebFinger request processing failed with status code: {} for resource: {}", statusCode, resource);
+            httpServletResponse.setStatus(statusCode);
             return;
         } catch (ServerConfigurationException e) {
-            log.error("Server Configuration error occurred.", e);
+            log.error("Server Configuration error occurred while processing WebFinger request for resource: {}", resource, e);
             httpServletResponse.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
             return;
         }
         httpServletResponse.setContentType(WebFingerConstants.RESPONSE_CONTENT_TYPE);
         PrintWriter out = httpServletResponse.getWriter();
         out.print(response);
+        if (log.isDebugEnabled()) {
+            log.debug("WebFinger response sent successfully for resource: {}", resource);
+        }
     }
 }

@@ -49,6 +49,9 @@ public class OIDCDCRServiceComponent {
     protected void activate(ComponentContext componentContext) {
 
         try {
+            if (log.isDebugEnabled()) {
+                log.debug("Activating OIDC DCR Service Component");
+            }
 
             componentContext.getBundleContext().registerService(HttpIdentityRequestFactory.class.getName(),
                     new OIDCRegistrationRequestFactory(), null);
@@ -56,8 +59,12 @@ public class OIDCDCRServiceComponent {
                     new OIDCDCRProcessor(), null);
             componentContext.getBundleContext().registerService(HttpIdentityResponseFactory.class.getName(),
                     new HttpOIDCRegistrationResponseFactory(), null);
+                    
+            if (log.isInfoEnabled()) {
+                log.info("OIDC DCR Service Component activated successfully");
+            }
         } catch (Throwable e) {
-            log.error("Error occurred while activating OIDCDCRServiceComponent", e);
+            log.error("Error occurred while activating OIDC DCR Service Component", e);
         }
     }
 
@@ -65,7 +72,7 @@ public class OIDCDCRServiceComponent {
     protected void deactivate(ComponentContext componentContext) {
 
         if (log.isDebugEnabled()) {
-            log.debug("Stopping OIDCDCRServiceComponent");
+            log.debug("Deactivating OIDC DCR Service Component");
         }
     }
 
@@ -84,7 +91,7 @@ public class OIDCDCRServiceComponent {
     protected void setApplicationManagementService(ApplicationManagementService applicationManagementService) {
 
         if (log.isDebugEnabled()) {
-            log.debug("Setting ApplicationManagement Service.");
+            log.debug("Setting ApplicationManagement Service for OIDC DCR");
         }
         OIDCDCRDataHolder.getInstance().
                 setApplicationManagementService(applicationManagementService);
@@ -98,7 +105,7 @@ public class OIDCDCRServiceComponent {
     protected void unsetApplicationManagementService(ApplicationManagementService applicationManagementService) {
 
         if (log.isDebugEnabled()) {
-            log.debug("Unsetting ApplicationManagement Service.");
+            log.debug("Unsetting ApplicationManagement Service from OIDC DCR");
         }
         OIDCDCRDataHolder.getInstance().setApplicationManagementService(null);
     }

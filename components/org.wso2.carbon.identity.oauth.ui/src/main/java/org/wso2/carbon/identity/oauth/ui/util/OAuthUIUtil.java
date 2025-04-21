@@ -100,7 +100,7 @@ public class OAuthUIUtil {
             return true;
         } catch (URISyntaxException e) {
             if (log.isDebugEnabled()) {
-                log.debug("Malformed URL: " + uri, e);
+                log.debug("Malformed URL: {}", uri);
             }
             return false;
         }
@@ -151,9 +151,8 @@ public class OAuthUIUtil {
     public static boolean isValidURL(String urlString) {
 
         if (StringUtils.isBlank(urlString)) {
-            String errorMsg = "Invalid URL.";
             if (log.isDebugEnabled()) {
-                log.debug(errorMsg);
+                log.debug("URL validation failed - URL is blank or null");
             }
             return false;
         }
@@ -170,7 +169,7 @@ public class OAuthUIUtil {
             new URL(urlString);
         } catch (MalformedURLException | URISyntaxException |  URLBuilderException e) {
             if (log.isDebugEnabled()) {
-                log.debug(e.getMessage(), e);
+                log.debug("URL validation failed for URL: {}", urlString);
             }
             return false;
         }
