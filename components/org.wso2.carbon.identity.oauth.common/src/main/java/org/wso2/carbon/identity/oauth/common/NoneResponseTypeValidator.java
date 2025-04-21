@@ -18,6 +18,8 @@
 
 package org.wso2.carbon.identity.oauth.common;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.oltu.oauth2.common.OAuth;
 import org.apache.oltu.oauth2.common.error.OAuthError;
 import org.apache.oltu.oauth2.common.exception.OAuthProblemException;
@@ -30,18 +32,31 @@ import javax.servlet.http.HttpServletRequest;
  */
 public class NoneResponseTypeValidator extends AbstractValidator<HttpServletRequest> {
 
+    private static final Log log = LogFactory.getLog(NoneResponseTypeValidator.class);
+
     @Override
     public void validateMethod(HttpServletRequest request) throws OAuthProblemException {
 
         String method = request.getMethod();
+        if (log.isDebugEnabled()) {
+            log.debug("Validating HTTP method for none response type: {}", method);
+        }
+        
         if (!OAuth.HttpMethod.GET.equals(method) && !OAuth.HttpMethod.POST.equals(method)) {
+            log.warn("Invalid HTTP method for none response type: {}. Only GET and POST methods are allowed", method);
             throw OAuthProblemException.error(OAuthError.CodeResponse.INVALID_REQUEST)
                     .description("Method not correct.");
+        }
+        
+        if (log.isDebugEnabled()) {
+            log.debug("HTTP method validation successful for none response type");
         }
     }
 
     @Override
     public void validateContentType(HttpServletRequest request) throws OAuthProblemException {
-
+        if (log.isDebugEnabled()) {
+            log.debug("Content type validation skipped for none response type");
+        }
     }
 }

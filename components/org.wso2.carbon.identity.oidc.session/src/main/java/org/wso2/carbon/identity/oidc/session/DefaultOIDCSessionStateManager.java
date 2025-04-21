@@ -85,8 +85,11 @@ public class DefaultOIDCSessionStateManager implements OIDCSessionStateManager {
         cookie.setSecure(true);
         cookie.setPath("/");
         cookie.setSameSite(SameSiteCookie.NONE);
-
+        
         response.addCookie(cookie);
+        if (log.isDebugEnabled()) {
+            log.debug("Added OP browser state cookie to the response with path: /");
+        }
         return cookie;
     }
 
@@ -127,6 +130,14 @@ public class DefaultOIDCSessionStateManager implements OIDCSessionStateManager {
         cookie.setSecure(true);
         cookie.setSameSite(SameSiteCookie.NONE);
         response.addCookie(cookie);
+        if (log.isDebugEnabled()) {
+            if (IdentityTenantUtil.isTenantedSessionsEnabled() && loginTenantDomain != null) {
+                String path = cookie.getPath();
+                log.debug("Added tenant-qualified OP browser state cookie to the response with path: " + path);
+            } else {
+                log.debug("Added OP browser state cookie to the response with path: /");
+            }
+        }
         return cookie;
     }
 
@@ -166,7 +177,7 @@ public class DefaultOIDCSessionStateManager implements OIDCSessionStateManager {
                     response.addCookie(oldCookie);
 
                     if (log.isDebugEnabled()) {
-                        log.debug("OPBS cookie was found with the root path and Invalidated it.");
+                        log.debug("OPBS cookie was found with the root path for cookie '" + cookie.getName() + "' and invalidated it.");
                     }
                 }
             }

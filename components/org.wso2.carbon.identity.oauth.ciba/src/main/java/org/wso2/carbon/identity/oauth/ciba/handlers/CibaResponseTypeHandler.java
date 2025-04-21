@@ -64,8 +64,18 @@ public class CibaResponseTypeHandler extends AbstractResponseTypeHandler {
             // Building custom CallBack URL.
             String callbackURL = authorizationReqDTO.getCallbackUrl() + "?authenticationStatus=" + authenticationStatus;
             respDTO.setCallbackURI(callbackURL);
+            
+            if (log.isDebugEnabled()) {
+                log.debug("Successfully processed CIBA authentication response for auth_req_id: {}", 
+                        authorizationReqDTO.getNonce());
+            }
+            log.info("User {} successfully authenticated for CIBA request with auth_req_id: {}", 
+                    cibaAuthenticatedUser.getUserName(), authorizationReqDTO.getNonce());
+            
             return respDTO;
         } catch (CibaCoreException e) {
+            log.error("Error persisting authenticated user for CIBA request with auth_req_id: {} from client: {}", 
+                    authorizationReqDTO.getNonce(), authorizationReqDTO.getConsumerKey(), e);
             throw new IdentityOAuth2Exception("Error occurred in persisting authenticated user and authentication " +
                     "status for the request made by client: " + authorizationReqDTO.getConsumerKey(), e);
         }
@@ -86,9 +96,9 @@ public class CibaResponseTypeHandler extends AbstractResponseTypeHandler {
             oAuthErrorDTO.setErrorDescription("User denied the consent.");
             return oAuthErrorDTO;
         } catch (CibaCoreException e) {
+            log.error("Error updating authentication status to CONSENT_DENIED for auth_req_id: {}", authReqID, e);
             if (log.isDebugEnabled()) {
-                log.debug("Error occurred in updating the authentication_status for the auth_req_id : " + authReqID +
-                        "with responseType as (ciba). ");
+                log.debug("Failed to update status for auth_req_id: {} with responseType as ciba", authReqID);
             }
         }
         return null;
@@ -106,9 +116,9 @@ public class CibaResponseTypeHandler extends AbstractResponseTypeHandler {
             oAuthErrorDTO.setErrorDescription("Authentication failed.");
             return oAuthErrorDTO;
         } catch (CibaCoreException e) {
+            log.error("Error updating authentication status to FAILED for auth_req_id: {}", authReqID, e);
             if (log.isDebugEnabled()) {
-                log.debug("Error occurred in updating the authentication_status for the ID : " + authReqID +
-                        "with responseType as (ciba). ");
+                log.debug("Failed to update failure status for auth_req_id: {} with responseType as ciba", authReqID);
             }
         }
         return null;
@@ -123,8 +133,9 @@ public class CibaResponseTypeHandler extends AbstractResponseTypeHandler {
         OAuthAppDO oAuthAppDO = (OAuthAppDO) authzReqMsgCtx.getProperty("OAuthAppDO");
         if (StringUtils.isBlank(oAuthAppDO.getGrantTypes())) {
             if (log.isDebugEnabled()) {
-                log.debug("Could not find authorized grant types for client id: " + consumerKey);
+                log.debug("Could not find authorized grant types for client id: {}", consumerKey);
             }
+            log.warn("No grant types configured for OAuth client: {}", consumerKey);
             return false;
         }
         String responseType = authzReqDTO.getResponseType();
@@ -135,8 +146,9 @@ public class CibaResponseTypeHandler extends AbstractResponseTypeHandler {
 
         if (StringUtils.isBlank(grantType)) {
             if (log.isDebugEnabled()) {
-                log.debug("Valid grant type not found for client id: " + consumerKey);
+                log.debug("Valid grant type not found for client id: {}", consumerKey);
             }
+            log.warn("Invalid response type: {} received for client: {}", responseType, consumerKey);
             return false;
         }
 
@@ -145,7 +157,12 @@ public class CibaResponseTypeHandler extends AbstractResponseTypeHandler {
                 // Do not change this log format as these logs use by external applications.
                 log.debug("Unsupported Grant Type: " + grantType + " for client id: " + consumerKey);
             }
+            log.warn("CIBA grant type not allowed for client: {}", consumerKey);
             return false;
+        }
+        
+        if (log.isDebugEnabled()) {
+            log.debug("Client: {} is authorized to use CIBA response type", consumerKey);
         }
         return true;
     }

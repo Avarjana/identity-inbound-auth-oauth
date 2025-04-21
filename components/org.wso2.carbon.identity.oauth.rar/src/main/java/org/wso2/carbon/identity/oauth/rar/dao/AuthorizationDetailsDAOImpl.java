@@ -18,6 +18,8 @@
 
 package org.wso2.carbon.identity.oauth.rar.dao;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.wso2.carbon.identity.core.util.IdentityDatabaseUtil;
 import org.wso2.carbon.identity.oauth.rar.dto.AuthorizationDetailsCodeDTO;
 import org.wso2.carbon.identity.oauth.rar.dto.AuthorizationDetailsConsentDTO;
@@ -38,6 +40,8 @@ import java.util.Set;
  */
 public class AuthorizationDetailsDAOImpl implements AuthorizationDetailsDAO {
 
+    private static final Log log = LogFactory.getLog(AuthorizationDetailsDAOImpl.class);
+
     /**
      * {@inheritDoc}
      */
@@ -45,6 +49,9 @@ public class AuthorizationDetailsDAOImpl implements AuthorizationDetailsDAO {
     public int[] addUserConsentedAuthorizationDetails(final Set<AuthorizationDetailsConsentDTO> consentDTOs)
             throws SQLException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Adding user consented authorization details. Count: {}", consentDTOs.size());
+        }
         try (final Connection connection = IdentityDatabaseUtil.getDBConnection(false);
              PreparedStatement ps =
                      connection.prepareStatement(SQLQueries.ADD_OAUTH2_USER_CONSENTED_AUTHORIZATION_DETAILS)) {
@@ -58,7 +65,12 @@ public class AuthorizationDetailsDAOImpl implements AuthorizationDetailsDAO {
                 ps.setInt(6, consentDTO.getTenantId());
                 ps.addBatch();
             }
-            return ps.executeBatch();
+            int[] result = ps.executeBatch();
+            log.info("Successfully added user consented authorization details");
+            return result;
+        } catch (SQLException e) {
+            log.error("Error while adding user consented authorization details", e);
+            throw e;
         }
     }
 
@@ -69,6 +81,9 @@ public class AuthorizationDetailsDAOImpl implements AuthorizationDetailsDAO {
     public int[] updateUserConsentedAuthorizationDetails(final Set<AuthorizationDetailsConsentDTO> consentDTOs)
             throws SQLException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Updating user consented authorization details. Count: {}", consentDTOs.size());
+        }
         try (final Connection connection = IdentityDatabaseUtil.getDBConnection(false);
              PreparedStatement ps =
                      connection.prepareStatement(SQLQueries.UPDATE_OAUTH2_USER_CONSENTED_AUTHORIZATION_DETAILS)) {
@@ -82,7 +97,12 @@ public class AuthorizationDetailsDAOImpl implements AuthorizationDetailsDAO {
                 ps.setInt(6, consentDTO.getTenantId());
                 ps.addBatch();
             }
-            return ps.executeBatch();
+            int[] result = ps.executeBatch();
+            log.info("Successfully updated user consented authorization details");
+            return result;
+        } catch (SQLException e) {
+            log.error("Error while updating user consented authorization details", e);
+            throw e;
         }
     }
 
@@ -94,6 +114,10 @@ public class AuthorizationDetailsDAOImpl implements AuthorizationDetailsDAO {
                                                                                     final int tenantId)
             throws SQLException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Retrieving user consented authorization details for consentId: {}, tenantId: {}", 
+                    consentId, tenantId);
+        }
         try (final Connection connection = IdentityDatabaseUtil.getDBConnection(false);
              final PreparedStatement ps =
                      connection.prepareStatement(SQLQueries.GET_OAUTH2_USER_CONSENTED_AUTHORIZATION_DETAILS)) {
@@ -112,8 +136,15 @@ public class AuthorizationDetailsDAOImpl implements AuthorizationDetailsDAO {
                     authorizationDetailsConsentDTOs.add(new AuthorizationDetailsConsentDTO(id, consentId, typeId,
                             authorizationDetail, isConsentActive, tenantId));
                 }
+                if (log.isDebugEnabled()) {
+                    log.debug("Retrieved {} user consented authorization details", 
+                            authorizationDetailsConsentDTOs.size());
+                }
                 return authorizationDetailsConsentDTOs;
             }
+        } catch (SQLException e) {
+            log.error("Error while retrieving user consented authorization details for consentId: {}", consentId, e);
+            throw e;
         }
     }
 
@@ -124,13 +155,22 @@ public class AuthorizationDetailsDAOImpl implements AuthorizationDetailsDAO {
     public int deleteUserConsentedAuthorizationDetails(final String consentId, final int tenantId)
             throws SQLException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Deleting user consented authorization details for consentId: {}, tenantId: {}", 
+                    consentId, tenantId);
+        }
         try (final Connection connection = IdentityDatabaseUtil.getDBConnection(false);
              final PreparedStatement ps =
                      connection.prepareStatement(SQLQueries.DELETE_OAUTH2_USER_CONSENTED_AUTHORIZATION_DETAILS)) {
 
             ps.setString(1, consentId);
             ps.setInt(2, tenantId);
-            return ps.executeUpdate();
+            int rowsAffected = ps.executeUpdate();
+            log.info("Deleted {} user consented authorization details for consentId: {}", rowsAffected, consentId);
+            return rowsAffected;
+        } catch (SQLException e) {
+            log.error("Error while deleting user consented authorization details for consentId: {}", consentId, e);
+            throw e;
         }
     }
 
@@ -141,6 +181,9 @@ public class AuthorizationDetailsDAOImpl implements AuthorizationDetailsDAO {
     public int[] addAccessTokenAuthorizationDetails(final Set<AuthorizationDetailsTokenDTO> tokenDTOs)
             throws SQLException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Adding access token authorization details. Count: {}", tokenDTOs.size());
+        }
         try (final Connection connection = IdentityDatabaseUtil.getDBConnection(false);
              final PreparedStatement ps =
                      connection.prepareStatement(SQLQueries.ADD_OAUTH2_ACCESS_TOKEN_AUTHORIZATION_DETAILS)) {
@@ -153,7 +196,12 @@ public class AuthorizationDetailsDAOImpl implements AuthorizationDetailsDAO {
                 ps.setInt(5, tokenDTO.getTenantId());
                 ps.addBatch();
             }
-            return ps.executeBatch();
+            int[] result = ps.executeBatch();
+            log.info("Successfully added access token authorization details");
+            return result;
+        } catch (SQLException e) {
+            log.error("Error while adding access token authorization details", e);
+            throw e;
         }
     }
 
@@ -165,6 +213,10 @@ public class AuthorizationDetailsDAOImpl implements AuthorizationDetailsDAO {
                                                                                 final int tenantId)
             throws SQLException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Retrieving access token authorization details for accessTokenId: {}, tenantId: {}", 
+                     accessTokenId, tenantId);
+        }
         try (final Connection connection = IdentityDatabaseUtil.getDBConnection(false);
              final PreparedStatement ps =
                      connection.prepareStatement(SQLQueries.GET_OAUTH2_ACCESS_TOKEN_AUTHORIZATION_DETAILS)) {
@@ -182,8 +234,15 @@ public class AuthorizationDetailsDAOImpl implements AuthorizationDetailsDAO {
                     authorizationDetailsTokenDTO.add(
                             new AuthorizationDetailsTokenDTO(id, accessTokenId, typeId, authorizationDetail, tenantId));
                 }
+                if (log.isDebugEnabled()) {
+                    log.debug("Retrieved {} access token authorization details", authorizationDetailsTokenDTO.size());
+                }
                 return authorizationDetailsTokenDTO;
             }
+        } catch (SQLException e) {
+            log.error("Error while retrieving access token authorization details for accessTokenId: {}", 
+                     accessTokenId, e);
+            throw e;
         }
     }
 
@@ -194,13 +253,23 @@ public class AuthorizationDetailsDAOImpl implements AuthorizationDetailsDAO {
     public int deleteAccessTokenAuthorizationDetails(final String accessTokenId, final int tenantId)
             throws SQLException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Deleting access token authorization details for accessTokenId: {}, tenantId: {}", 
+                     accessTokenId, tenantId);
+        }
         try (final Connection connection = IdentityDatabaseUtil.getDBConnection(false);
              final PreparedStatement ps =
                      connection.prepareStatement(SQLQueries.DELETE_OAUTH2_ACCESS_TOKEN_AUTHORIZATION_DETAILS)) {
 
             ps.setString(1, accessTokenId);
             ps.setInt(2, tenantId);
-            return ps.executeUpdate();
+            int rowsAffected = ps.executeUpdate();
+            log.info("Deleted {} access token authorization details for accessTokenId: {}", rowsAffected, accessTokenId);
+            return rowsAffected;
+        } catch (SQLException e) {
+            log.error("Error while deleting access token authorization details for accessTokenId: {}", 
+                     accessTokenId, e);
+            throw e;
         }
     }
 
@@ -211,6 +280,9 @@ public class AuthorizationDetailsDAOImpl implements AuthorizationDetailsDAO {
     public int[] addOAuth2CodeAuthorizationDetails(final Set<AuthorizationDetailsCodeDTO> authorizationDetailsCodeDTOs)
             throws SQLException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Adding OAuth2 code authorization details. Count: {}", authorizationDetailsCodeDTOs.size());
+        }
         try (final Connection connection = IdentityDatabaseUtil.getDBConnection(false);
              final PreparedStatement ps =
                      connection.prepareStatement(SQLQueries.ADD_OAUTH2_CODE_AUTHORIZATION_DETAILS)) {
@@ -223,7 +295,12 @@ public class AuthorizationDetailsDAOImpl implements AuthorizationDetailsDAO {
                 ps.setInt(5, authorizationDetailsCodeDTO.getTenantId());
                 ps.addBatch();
             }
-            return ps.executeBatch();
+            int[] result = ps.executeBatch();
+            log.info("Successfully added OAuth2 code authorization details");
+            return result;
+        } catch (SQLException e) {
+            log.error("Error while adding OAuth2 code authorization details", e);
+            throw e;
         }
     }
 
@@ -234,6 +311,10 @@ public class AuthorizationDetailsDAOImpl implements AuthorizationDetailsDAO {
     public Set<AuthorizationDetailsCodeDTO> getOAuth2CodeAuthorizationDetails(final String authorizationCode,
                                                                               final int tenantId) throws SQLException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Retrieving OAuth2 code authorization details for authorizationCode: {}, tenantId: {}", 
+                    authorizationCode, tenantId);
+        }
         try (final Connection connection = IdentityDatabaseUtil.getDBConnection(false);
              final PreparedStatement ps =
                      connection.prepareStatement(SQLQueries.GET_OAUTH2_CODE_AUTHORIZATION_DETAILS_BY_CODE)) {
@@ -251,8 +332,15 @@ public class AuthorizationDetailsDAOImpl implements AuthorizationDetailsDAO {
                     authorizationDetailsCodeDTOs.add(new AuthorizationDetailsCodeDTO(
                             codeId, typeId, authorizationDetail, tenantId));
                 }
+                if (log.isDebugEnabled()) {
+                    log.debug("Retrieved {} OAuth2 code authorization details", authorizationDetailsCodeDTOs.size());
+                }
                 return authorizationDetailsCodeDTOs;
             }
+        } catch (SQLException e) {
+            log.error("Error while retrieving OAuth2 code authorization details for authorizationCode: {}", 
+                    authorizationCode, e);
+            throw e;
         }
     }
 
@@ -263,6 +351,9 @@ public class AuthorizationDetailsDAOImpl implements AuthorizationDetailsDAO {
     public String getConsentIdByUserIdAndAppId(final String userId, final String appId, final int tenantId)
             throws SQLException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Retrieving consent ID for userId: {}, appId: {}, tenantId: {}", userId, appId, tenantId);
+        }
         try (final Connection connection = IdentityDatabaseUtil.getDBConnection(false);
              final PreparedStatement ps =
                      connection.prepareStatement(SQLQueries.GET_IDN_OAUTH2_USER_CONSENT_CONSENT_ID)) {
@@ -272,9 +363,19 @@ public class AuthorizationDetailsDAOImpl implements AuthorizationDetailsDAO {
             ps.setInt(3, tenantId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
-                    return rs.getString(1);
+                    String consentId = rs.getString(1);
+                    if (log.isDebugEnabled()) {
+                        log.debug("Found consent ID: {} for userId: {}, appId: {}", consentId, userId, appId);
+                    }
+                    return consentId;
                 }
             }
+        } catch (SQLException e) {
+            log.error("Error while retrieving consent ID for userId: {}, appId: {}", userId, appId, e);
+            throw e;
+        }
+        if (log.isDebugEnabled()) {
+            log.debug("No consent ID found for userId: {}, appId: {}", userId, appId);
         }
         return null;
     }

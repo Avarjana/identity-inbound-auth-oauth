@@ -43,27 +43,52 @@ public class WebFingerOIDCResponseBuilder {
     public WebFingerResponse buildWebFingerResponse(WebFingerRequest request) throws WebFingerEndpointException,
             ServerConfigurationException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Building WebFinger OIDC response for resource: {}, tenant: {}", 
+                    request.getResource(), request.getTenant());
+        }
+
         WebFingerResponse response;
         String oidcIssuerLocation;
         try {
             oidcIssuerLocation = getOidcIssuerLocation(request.getTenant());
+            if (log.isDebugEnabled()) {
+                log.debug("Retrieved OIDC issuer location: {} for tenant: {}", oidcIssuerLocation, request.getTenant());
+            }
         } catch (URISyntaxException | IdentityOAuth2Exception e) {
+            log.error("Error while building discovery endpoint for tenant: {}", request.getTenant(), e);
             throw new ServerConfigurationException("Error while building discovery endpoint", e);
         }
+        
         response = new WebFingerResponse();
         response.setSubject(request.getResource());
         response.addLink(WebFingerConstants.OPENID_CONNETCT_ISSUER_REL, oidcIssuerLocation);
+        
+        if (log.isDebugEnabled()) {
+            log.debug("Successfully built WebFinger OIDC response for resource: {}", request.getResource());
+        }
+        
         return response;
     }
 
     private String getOidcIssuerLocation(String tenantDomain) throws IdentityOAuth2Exception, URISyntaxException {
+        if (log.isDebugEnabled()) {
+            log.debug("Getting OIDC issuer location for tenant: {}", tenantDomain);
+        }
 
         String oidcIssuerLocation;
         if (isUseEntityIdAsIssuerInOidcDiscovery()) {
+            if (log.isDebugEnabled()) {
+                log.debug("Using entity ID as issuer in OIDC discovery for tenant: {}", tenantDomain);
+            }
             oidcIssuerLocation = OAuth2Util.getIssuerLocation(tenantDomain);
         } else {
+            if (log.isDebugEnabled()) {
+                log.debug("Using OIDC discovery EP URL as issuer for tenant: {}", tenantDomain);
+            }
             oidcIssuerLocation = OAuth2Util.OAuthURL.getOidcDiscoveryEPUrl(tenantDomain);
         }
+        
         return oidcIssuerLocation;
     }
 

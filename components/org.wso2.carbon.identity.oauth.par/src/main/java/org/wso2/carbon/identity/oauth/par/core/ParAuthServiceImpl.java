@@ -56,20 +56,26 @@ public class ParAuthServiceImpl implements ParAuthService {
     public ParAuthData handleParAuthRequest(Map<String, String> parameters) throws ParCoreException {
 
         String uuid = UUID.randomUUID().toString();
+        String clientId = parameters.get(OAuthConstants.OAuth20Params.CLIENT_ID);
+        
+        if (log.isDebugEnabled()) {
+            log.debug("Processing PAR request for client: {}", clientId);
+        }
 
         ParAuthData parAuthResponse = new ParAuthData();
         parAuthResponse.setrequestURIReference(uuid);
         parAuthResponse.setExpiryTime(getExpiresInValue());
 
         persistParRequest(uuid, parameters, getScheduledExpiry(System.currentTimeMillis()));
+        
+        log.info("PAR request successfully created with reference: {} for client: {}", uuid, clientId);
 
         if (LoggerUtils.isDiagnosticLogsEnabled()) {
             DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
                     OAuthConstants.LogConstants.OAUTH_INBOUND_SERVICE,
                     OAuthConstants.LogConstants.ActionIDs.HANDLE_REQUEST);
             diagnosticLogBuilder
-                    .inputParam(LogConstants.InputKeys.CLIENT_ID,
-                            parameters.get(OAuthConstants.OAuth20Params.CLIENT_ID))
+                    .inputParam(LogConstants.InputKeys.CLIENT_ID, clientId)
                     .inputParam(REQUEST_URI_REF, uuid)
                     .resultMessage("PAR auth request handled successfully.")
                     .resultStatus(DiagnosticLog.ResultStatus.SUCCESS)
@@ -90,16 +96,36 @@ public class ParAuthServiceImpl implements ParAuthService {
     @Override
     public Map<String, String> retrieveParams(String uuid, String clientId) throws ParCoreException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Retrieving PAR request parameters for reference: {} and client: {}", uuid, clientId);
+        }
+
         Optional<ParRequestDO> optionalParRequestDO = parMgtDAO.getRequestData(uuid);
         if (!optionalParRequestDO.isPresent()) {
+            log.warn("Invalid PAR request URI reference: {}. No matching request found.", uuid);
             throw new ParClientException(OAuth2ErrorCodes.OAuth2SubErrorCodes.INVALID_REQUEST_URI,
                     OAuthConstants.OAuthError.AuthorizationResponsei18nKey.INVALID_REQUEST_URI);
         }
 
         ParRequestDO parRequestDO = optionalParRequestDO.get();
         parMgtDAO.removeRequestData(uuid);
-        validateExpiryTime(parRequestDO.getExpiresIn());
-        validateClientID(clientId, parRequestDO.getClientId());
+        
+        try {
+            validateExpiryTime(parRequestDO.getExpiresIn());
+        } catch (ParClientException e) {
+            log.warn("PAR request with reference: {} has expired", uuid);
+            throw e;
+        }
+        
+        try {
+            validateClientID(clientId, parRequestDO.getClientId());
+        } catch (ParClientException e) {
+            log.warn("Client ID mismatch for PAR request with reference: {}. Expected: {}, Received: {}", 
+                    uuid, parRequestDO.getClientId(), clientId);
+            throw e;
+        }
+
+        log.info("PAR request parameters successfully retrieved for reference: {} and client: {}", uuid, clientId);
 
         if (LoggerUtils.isDiagnosticLogsEnabled()) {
             DiagnosticLog.DiagnosticLogBuilder diagnosticLogBuilder = new DiagnosticLog.DiagnosticLogBuilder(
@@ -119,6 +145,10 @@ public class ParAuthServiceImpl implements ParAuthService {
     private void validateExpiryTime(long expiresIn) throws ParClientException {
 
         long currentTimeInMillis = Calendar.getInstance(TimeZone.getTimeZone(ParConstants.UTC)).getTimeInMillis();
+
+        if (log.isDebugEnabled()) {
+            log.debug("Validating PAR request expiry. Current time: {}, Expiry time: {}", currentTimeInMillis, expiresIn);
+        }
 
         if (currentTimeInMillis > expiresIn) {
             throw new ParClientException(OAuth2ErrorCodes.OAuth2SubErrorCodes.INVALID_REQUEST_URI,
@@ -142,17 +172,24 @@ public class ParAuthServiceImpl implements ParAuthService {
             if ((StringUtils.isNotBlank(expiryTimeValue))) {
                 int expiryTime = Integer.parseInt((expiryTimeValue).trim());
                 if (expiryTime > 0) {
+                    if (log.isDebugEnabled()) {
+                        log.debug("Using configured PAR expiry time: {} seconds", expiryTime);
+                    }
                     return expiryTime;
                 }
-                log.warn(String.format("PAR expiry time should be a positive integer. " +
-                                "Default value: %s will be used.", ParConstants.EXPIRES_IN_DEFAULT_VALUE));
+                log.warn("PAR expiry time should be a positive integer. Default value: {} will be used.", 
+                        ParConstants.EXPIRES_IN_DEFAULT_VALUE);
             } else {
-                log.debug(String.format("PAR expiry time is not configured. Default value: %s will be used.",
-                        ParConstants.EXPIRES_IN_DEFAULT_VALUE));
+                if (log.isDebugEnabled()) {
+                    log.debug("PAR expiry time is not configured. Default value: {} will be used.",
+                            ParConstants.EXPIRES_IN_DEFAULT_VALUE);
+                }
             }
             return ParConstants.EXPIRES_IN_DEFAULT_VALUE;
 
         } catch (NumberFormatException e) {
+            log.error("Error while parsing PAR expiry time value. Using default value: {}", 
+                    ParConstants.EXPIRES_IN_DEFAULT_VALUE, e);
             throw new ParCoreException("Error while parsing the expiry time value.", e);
         }
     }

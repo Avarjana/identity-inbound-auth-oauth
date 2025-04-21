@@ -18,6 +18,8 @@
 
 package org.wso2.carbon.identity.oauth.common;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.oltu.oauth2.common.exception.OAuthProblemException;
 import org.apache.oltu.oauth2.common.utils.OAuthUtils;
 
@@ -32,6 +34,8 @@ import static org.wso2.carbon.identity.oauth.common.OAuthConstants.ALLOWED_CONTE
  */
 public class OAuthCommonUtil {
 
+    private static final Log log = LogFactory.getLog(OAuthCommonUtil.class);
+
     /**
      * Check whether HTTP content type header is an allowed content type.
      *
@@ -42,14 +46,23 @@ public class OAuthCommonUtil {
     public static boolean isAllowedContentType(String contentTypeHeader, List<String> allowedContentTypes) {
 
         if (contentTypeHeader == null || allowedContentTypes == null) {
+            if (log.isDebugEnabled()) {
+                log.debug("Content type header or allowed content types list is null");
+            }
             return false;
         }
 
         String[] requestContentTypes = contentTypeHeader.split(";");
         for (String requestContentType : requestContentTypes) {
             if (allowedContentTypes.contains(requestContentType)) {
+                if (log.isDebugEnabled()) {
+                    log.debug("Content type {} is allowed", requestContentType);
+                }
                 return true;
             }
+        }
+        if (log.isDebugEnabled()) {
+            log.debug("Content type {} is not in the allowed list {}", contentTypeHeader, allowedContentTypes);
         }
         return false;
     }
@@ -65,7 +78,11 @@ public class OAuthCommonUtil {
 
         String contentType = request.getContentType();
         if (!isAllowedContentType(contentType, ALLOWED_CONTENT_TYPES)) {
+            log.warn("Invalid content type: {}. Allowed types are: {}", contentType, String.join(" or ", ALLOWED_CONTENT_TYPES));
             throw OAuthUtils.handleBadContentTypeException(String.join(" or ", ALLOWED_CONTENT_TYPES));
+        }
+        if (log.isDebugEnabled()) {
+            log.debug("Content type validation successful for request with content type: {}", contentType);
         }
     }
 }

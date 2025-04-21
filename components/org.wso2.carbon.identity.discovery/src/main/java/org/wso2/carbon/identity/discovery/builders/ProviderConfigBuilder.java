@@ -55,17 +55,29 @@ public class ProviderConfigBuilder {
 
     public OIDProviderConfigResponse buildOIDProviderConfig(OIDProviderRequest request) throws
             OIDCDiscoveryEndPointException, ServerConfigurationException {
+        if (log.isDebugEnabled()) {
+            log.debug("Building OIDC provider configuration for tenant: {}", request.getTenantDomain());
+        }
         OIDProviderConfigResponse providerConfig = new OIDProviderConfigResponse();
         String tenantDomain = request.getTenantDomain();
         if (isUseEntityIdAsIssuerInOidcDiscovery()) {
             try {
-                providerConfig.setIssuer(OAuth2Util.getIdTokenIssuer(tenantDomain));
+                String issuer = OAuth2Util.getIdTokenIssuer(tenantDomain);
+                providerConfig.setIssuer(issuer);
+                if (log.isDebugEnabled()) {
+                    log.debug("Using entity ID as issuer in OIDC discovery: {}", issuer);
+                }
             } catch (IdentityOAuth2Exception e) {
+                log.error("Error while retrieving OIDC ID token issuer value for tenant: {}", tenantDomain, e);
                 throw new ServerConfigurationException(String.format("Error while retrieving OIDC Id token issuer " +
                         "value for tenant domain: %s", tenantDomain), e);
             }
         } else {
-            providerConfig.setIssuer(OAuth2Util.getIDTokenIssuer());
+            String issuer = OAuth2Util.getIDTokenIssuer();
+            providerConfig.setIssuer(issuer);
+            if (log.isDebugEnabled()) {
+                log.debug("Using default issuer in OIDC discovery: {}", issuer);
+            }
         }
         providerConfig.setAuthorizationEndpoint(OAuth2Util.OAuthURL.getOAuth2AuthzEPUrl());
         providerConfig.setPushedAuthorizationRequestEndpoint(OAuth2Util.OAuthURL.getOAuth2ParEPUrl());
@@ -83,12 +95,19 @@ public class ProviderConfigBuilder {
             providerConfig.setIntrospectionEndpoint(OAuth2Util.OAuthURL.getOAuth2IntrospectionEPUrl(tenantDomain));
             providerConfig.setRegistrationEndpoint(OAuth2Util.OAuthURL.getOAuth2DCREPUrl(tenantDomain));
             providerConfig.setJwksUri(OAuth2Util.OAuthURL.getOAuth2JWKSPageUrl(tenantDomain));
+            if (log.isDebugEnabled()) {
+                log.debug("Set tenant-specific endpoints for tenant: {}", tenantDomain);
+            }
         } catch (URISyntaxException e) {
+            log.error("Error while building tenant-specific URLs for tenant: {}", tenantDomain, e);
             throw new ServerConfigurationException("Error while building tenant specific url", e);
         }
         List<String> scopes = OAuth2Util.getOIDCScopes(tenantDomain);
         providerConfig.setScopesSupported(scopes.toArray(new String[scopes.size()]));
         try {
+            if (log.isDebugEnabled()) {
+                log.debug("Retrieving OIDC claims for tenant: {}", tenantDomain);
+            }
             List<ExternalClaim> claims = OIDCDiscoveryDataHolder.getInstance().getClaimManagementService()
                     .getExternalClaims(OIDC_CLAIM_DIALECT, tenantDomain);
             String[] claimArray = new String[claims.size() + 2];
@@ -99,14 +118,22 @@ public class ProviderConfigBuilder {
             claimArray[i++] = "iss";
             claimArray[i] = "acr";
             providerConfig.setClaimsSupported(claimArray);
+            if (log.isDebugEnabled()) {
+                log.debug("Successfully set {} claims for OIDC discovery in tenant: {}", claims.size() + 2, tenantDomain);
+            }
         } catch (ClaimMetadataException e) {
+            log.error("Error while retrieving OIDC claim dialect for tenant: {}", tenantDomain, e);
             throw new ServerConfigurationException("Error while retrieving OIDC claim dialect", e);
         }
         try {
-            providerConfig.setIdTokenSigningAlgValuesSupported(new String[]{
-                OAuth2Util.mapSignatureAlgorithmForJWSAlgorithm
-                        (OAuthServerConfiguration.getInstance().getIdTokenSignatureAlgorithm()).getName()});
+            String signingAlg = OAuth2Util.mapSignatureAlgorithmForJWSAlgorithm(
+                    OAuthServerConfiguration.getInstance().getIdTokenSignatureAlgorithm()).getName();
+            providerConfig.setIdTokenSigningAlgValuesSupported(new String[]{signingAlg});
+            if (log.isDebugEnabled()) {
+                log.debug("Set ID token signing algorithm: {} for tenant: {}", signingAlg, tenantDomain);
+            }
         } catch (IdentityOAuth2Exception e) {
+            log.error("Unsupported signature algorithm configured for ID token in tenant: {}", tenantDomain, e);
             throw new ServerConfigurationException("Unsupported signature algorithm configured.", e);
         }
 
@@ -123,11 +150,14 @@ public class ProviderConfigBuilder {
                 IdentityUtil.getProperty(IdentityConstants.OAuth.OIDC_LOGOUT_EP_URL),
                 IdentityUtil.getProperty(IdentityConstants.OAuth.OIDC_LOGOUT_EP_URL_V2)));
         try {
-            providerConfig.setUserinfoSigningAlgValuesSupported(new String[] {
-                    OAuth2Util.mapSignatureAlgorithmForJWSAlgorithm(
-                            OAuthServerConfiguration.getInstance().getUserInfoJWTSignatureAlgorithm()).getName()
-            });
+            String userinfoSigningAlg = OAuth2Util.mapSignatureAlgorithmForJWSAlgorithm(
+                    OAuthServerConfiguration.getInstance().getUserInfoJWTSignatureAlgorithm()).getName();
+            providerConfig.setUserinfoSigningAlgValuesSupported(new String[] {userinfoSigningAlg});
+            if (log.isDebugEnabled()) {
+                log.debug("Set UserInfo signing algorithm: {} for tenant: {}", userinfoSigningAlg, tenantDomain);
+            }
         } catch (IdentityOAuth2Exception e) {
+            log.error("Unsupported signature algorithm configured for UserInfo in tenant: {}", tenantDomain, e);
             throw new ServerConfigurationException("Unsupported signature algorithm configured.", e);
         }
 
@@ -159,6 +189,14 @@ public class ProviderConfigBuilder {
         if (authorizationDetailTypes != null && !authorizationDetailTypes.isEmpty()) {
             providerConfig
                     .setAuthorizationDetailsTypesSupported(authorizationDetailTypes.stream().toArray(String[]::new));
+            if (log.isDebugEnabled()) {
+                log.debug("Added {} authorization detail types to OIDC discovery for tenant: {}", 
+                        authorizationDetailTypes.size(), tenantDomain);
+            }
+        }
+        
+        if (log.isDebugEnabled()) {
+            log.debug("Successfully built complete OIDC provider configuration for tenant: {}", tenantDomain);
         }
         return providerConfig;
     }

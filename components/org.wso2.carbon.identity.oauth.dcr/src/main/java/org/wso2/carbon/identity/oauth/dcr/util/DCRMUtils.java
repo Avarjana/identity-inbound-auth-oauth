@@ -48,12 +48,12 @@ public class DCRMUtils {
     public static boolean isRedirectionUriValid(String redirectUri) {
 
         if (log.isDebugEnabled()) {
-            log.debug("Validating uri: " + redirectUri);
+            log.debug("Validating redirection URI: {}", redirectUri);
         }
 
         if (IdentityUtil.isBlank(redirectUri)) {
             if (log.isDebugEnabled()) {
-                log.debug("The redirection URI is either null or blank.");
+                log.debug("The redirection URI is either null or blank");
             }
             return false;
         }
@@ -63,8 +63,7 @@ public class DCRMUtils {
             new URI(redirectUri);
         } catch (URISyntaxException e) {
             if (log.isDebugEnabled()) {
-                String errorMessage = "The redirection URI: " + redirectUri + ", is not a valid URI.";
-                log.debug(errorMessage, e);
+                log.debug("The redirection URI: {} is not a valid URI", redirectUri, e);
             }
             return false;
         }
@@ -78,14 +77,12 @@ public class DCRMUtils {
         }
 
         if (log.isDebugEnabled()) {
-            log.debug("Validating back-channel logout uri: " + backchannelLogoutUri);
+            log.debug("Validating back-channel logout URI: {}", backchannelLogoutUri);
         }
 
         if (backchannelLogoutUri.contains("#")) {
             if (log.isDebugEnabled()) {
-                String errorMessage = "The back-channel logout URI: " + backchannelLogoutUri
-                        + ", contains a fragment component.";
-                log.debug(errorMessage);
+                log.debug("The back-channel logout URI: {} contains a fragment component", backchannelLogoutUri);
             }
             return false;
         }
@@ -95,17 +92,14 @@ public class DCRMUtils {
             uri = new URI(backchannelLogoutUri);
         } catch (URISyntaxException e) {
             if (log.isDebugEnabled()) {
-                String errorMessage = "The back-channel logout URI: " + backchannelLogoutUri + ", is not a valid URI.";
-                log.debug(errorMessage, e);
+                log.debug("The back-channel logout URI: {} is not a valid URI", backchannelLogoutUri, e);
             }
             return false;
         }
 
         if (!uri.isAbsolute()) {
             if (log.isDebugEnabled()) {
-                String errorMessage = "The back-channel logout URI: " + backchannelLogoutUri
-                        + ", is not an absolute URI.";
-                log.debug(errorMessage);
+                log.debug("The back-channel logout URI: {} is not an absolute URI", backchannelLogoutUri);
             }
             return false;
         }

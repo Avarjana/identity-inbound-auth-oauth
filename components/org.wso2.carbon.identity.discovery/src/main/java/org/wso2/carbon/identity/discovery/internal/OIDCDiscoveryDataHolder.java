@@ -18,6 +18,8 @@
 
 package org.wso2.carbon.identity.discovery.internal;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.wso2.carbon.identity.claim.metadata.mgt.ClaimMetadataManagementService;
 
 /**
@@ -25,18 +27,26 @@ import org.wso2.carbon.identity.claim.metadata.mgt.ClaimMetadataManagementServic
  */
 public class OIDCDiscoveryDataHolder {
 
+    private static final Log log = LogFactory.getLog(OIDCDiscoveryDataHolder.class);
     private static OIDCDiscoveryDataHolder instance = new OIDCDiscoveryDataHolder();
+    
     public static OIDCDiscoveryDataHolder getInstance() {
         return instance;
     }
+    
     private ClaimMetadataManagementService claimManagementService;
 
-
     public void setClaimManagementService(ClaimMetadataManagementService identityClaimManagementService) {
+        if (log.isDebugEnabled()) {
+            log.debug("Setting ClaimMetadataManagementService in OIDCDiscoveryDataHolder");
+        }
         this.claimManagementService = identityClaimManagementService;
     }
 
     public ClaimMetadataManagementService getClaimManagementService() {
+        if (claimManagementService == null && log.isDebugEnabled()) {
+            log.debug("ClaimMetadataManagementService is not available in OIDCDiscoveryDataHolder");
+        }
         return claimManagementService;
     }
 }

@@ -19,6 +19,8 @@
 package org.wso2.carbon.identity.oauth.common;
 
 import org.apache.commons.lang.StringUtils;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.oltu.oauth2.as.validator.TokenValidator;
 import org.apache.oltu.oauth2.common.OAuth;
 import org.apache.oltu.oauth2.common.error.OAuthError;
@@ -32,6 +34,8 @@ import static org.wso2.carbon.identity.oauth.common.OAuthConstants.OAuth20Params
  * Validator for ID token response.
  */
 public class IDTokenResponseValidator extends TokenValidator {
+
+    private static final Log log = LogFactory.getLog(IDTokenResponseValidator.class);
 
     public IDTokenResponseValidator() {
 
@@ -56,29 +60,53 @@ public class IDTokenResponseValidator extends TokenValidator {
 
     public void validateRequiredParameters(HttpServletRequest request) throws OAuthProblemException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Validating required parameters for id_token response");
+        }
+        
         super.validateRequiredParameters(request);
 
         // for id_token response type, the scope parameter should contain 'openid' as one of the scopes.
         String openIdScope = request.getParameter(SCOPE);
+        
+        if (log.isDebugEnabled()) {
+            log.debug("Validating openid scope for id_token response. Scope: {}", openIdScope);
+        }
+        
         if (StringUtils.isBlank(openIdScope) || !containOIDCScope(openIdScope)) {
+            log.warn("Invalid request: openid scope not found for id_token response. Scope: {}", openIdScope);
             throw OAuthProblemException.error(OAuthError.TokenResponse.INVALID_REQUEST)
                     .description("\'response_type\' contains \'id_token\'; but \'openid\' scope not found.");
         }
-
+        
+        if (log.isDebugEnabled()) {
+            log.debug("Required parameter validation successful for id_token response");
+        }
     }
 
     @Override
     public void validateMethod(HttpServletRequest request) throws OAuthProblemException {
 
         String method = request.getMethod();
+        if (log.isDebugEnabled()) {
+            log.debug("Validating HTTP method for id_token response: {}", method);
+        }
+        
         if (!OAuth.HttpMethod.GET.equals(method) && !OAuth.HttpMethod.POST.equals(method)) {
+            log.warn("Invalid HTTP method for id_token response: {}. Only GET and POST methods are allowed", method);
             throw OAuthProblemException.error(OAuthError.CodeResponse.INVALID_REQUEST)
                     .description("Method not correct.");
+        }
+        
+        if (log.isDebugEnabled()) {
+            log.debug("HTTP method validation successful for id_token response");
         }
     }
 
     @Override
     public void validateContentType(HttpServletRequest request) throws OAuthProblemException {
-
+        if (log.isDebugEnabled()) {
+            log.debug("Content type validation skipped for id_token response");
+        }
     }
 }

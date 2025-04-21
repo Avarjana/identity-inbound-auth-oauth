@@ -35,20 +35,20 @@ public class RarServiceComponent {
     protected void activate(ComponentContext context) {
 
         try {
-            log.debug("RAR component bundle is activating.");
+            log.debug("Rich Authorization Request (RAR) component bundle is activating");
 
             context.getBundleContext().registerService(AuthorizationDetailsSchemaValidator.class,
                     AuthorizationDetailsSchemaValidatorImpl.getInstance(), null);
 
-            log.debug("RAR component bundle is activated.");
+            log.info("Rich Authorization Request (RAR) component activated successfully");
         } catch (Throwable e) {
-            log.error("Error occurred while activating RAR component.", e);
+            log.error("Error occurred while activating Rich Authorization Request (RAR) component", e);
         }
     }
 
     protected void deactivate(ComponentContext context) {
 
-        log.debug("RAR component bundle is deactivated.");
+        log.info("Rich Authorization Request (RAR) component deactivated");
     }
 }
 

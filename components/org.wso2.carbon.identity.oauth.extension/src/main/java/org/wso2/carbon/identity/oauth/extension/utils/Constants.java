@@ -18,11 +18,23 @@
 
 package org.wso2.carbon.identity.oauth.extension.utils;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 /**
  * This class contains the constants used in the extension.
  */
 public class Constants {
+    
+    private static final Logger log = LogManager.getLogger(Constants.class);
 
     public static final String OPENJDK_SCRIPT_CLASS_NAME = "org.openjdk.nashorn.api.scripting.ScriptObjectMirror";
     public static final String JDK_SCRIPT_CLASS_NAME = "jdk.nashorn.api.scripting.ScriptObjectMirror";
+    
+    static {
+        if (log.isDebugEnabled()) {
+            log.debug("Initialized OAuth extension constants with OpenJDK script class: {} and JDK script class: {}", 
+                    OPENJDK_SCRIPT_CLASS_NAME, JDK_SCRIPT_CLASS_NAME);
+        }
+    }
 }

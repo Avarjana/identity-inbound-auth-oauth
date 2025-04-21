@@ -54,7 +54,7 @@ public class DCRProcessor extends IdentityProcessor {
     public IdentityResponse.IdentityResponseBuilder process(IdentityRequest identityRequest) throws DCRException {
 
         if (log.isDebugEnabled()) {
-            log.debug("Request processing started by DCRProcessor.");
+            log.debug("Request processing started by DCRProcessor");
         }
 
         boolean isIdentityRegisterEnabled =
@@ -62,21 +62,30 @@ public class DCRProcessor extends IdentityProcessor {
 
         if (!isIdentityRegisterEnabled) {
             if (log.isDebugEnabled()) {
-                log.debug("Identity Register endpoint was deprecated. To enable the DCR API endpoint add the " +
-                        "following config to deployment.toml file. \n" +
-                        "[[legacy_feature]] \n" +
-                        "id = identity/register \n" +
-                        "enable = true");
+                log.debug("Identity Register endpoint was deprecated. To enable the DCR API endpoint add the "
+                        + "following config to deployment.toml file: [[legacy_feature]] id = identity/register enable = true");
             }
             String errorMessage = "/identity/register API was deprecated.";
             throw IdentityException.error(RegistrationException.class, ErrorCodes.FORBIDDEN.toString(), errorMessage);
         }
+        
         DCRMessageContext dcrMessageContext = new DCRMessageContext(identityRequest);
         IdentityResponse.IdentityResponseBuilder identityResponseBuilder = null;
+        
         if (identityRequest instanceof RegistrationRequest) {
+            if (log.isDebugEnabled()) {
+                log.debug("Processing registration request");
+            }
             identityResponseBuilder = registerOAuthApplication(dcrMessageContext);
         } else if (identityRequest instanceof UnregistrationRequest) {
+            if (log.isDebugEnabled()) {
+                log.debug("Processing unregistration request");
+            }
             identityResponseBuilder = unRegisterOAuthApplication(dcrMessageContext);
+        }
+        
+        if (log.isDebugEnabled()) {
+            log.debug("Request processing completed by DCRProcessor");
         }
         return identityResponseBuilder;
     }
@@ -152,7 +161,7 @@ public class DCRProcessor extends IdentityProcessor {
             }
         }
         if (log.isDebugEnabled()) {
-            log.debug("canHandle " + canHandle + " by DCRProcessor.");
+            log.debug("DCRProcessor canHandle request: {}", canHandle);
         }
         return canHandle;
     }

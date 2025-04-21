@@ -60,9 +60,11 @@ public class DCRServiceComponent {
 
     @SuppressWarnings("unused")
     protected void activate(ComponentContext componentContext) {
-
         try {
-
+            if (log.isDebugEnabled()) {
+                log.debug("Activating DCRServiceComponent");
+            }
+            
             componentContext.getBundleContext().registerService(IdentityProcessor.class.getName(),
                     new DCRProcessor(), null);
 
@@ -86,6 +88,10 @@ public class DCRServiceComponent {
                     new DCRMService(), null);
             componentContext.getBundleContext().registerService(DCRConfigurationMgtService.class.getName(),
                     new DCRConfigurationMgtServiceImpl(), null);
+                    
+            if (log.isInfoEnabled()) {
+                log.info("DCRServiceComponent activation completed successfully");
+            }
         } catch (Throwable e) {
             log.error("Error occurred while activating DCRServiceComponent", e);
         }
@@ -128,7 +134,7 @@ public class DCRServiceComponent {
     protected void unsetRegistrationHandler(RegistrationHandler registrationHandler) {
 
         if (log.isDebugEnabled()) {
-            log.debug("Unsetting RegistrationHandler.");
+            log.debug("Unsetting RegistrationHandler");
         }
         DCRDataHolder.getInstance().
                 getRegistrationHandlerList().add(null);

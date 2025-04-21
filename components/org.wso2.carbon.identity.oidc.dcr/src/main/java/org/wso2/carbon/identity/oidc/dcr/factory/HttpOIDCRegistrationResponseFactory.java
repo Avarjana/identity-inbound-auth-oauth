@@ -69,8 +69,7 @@ public class HttpOIDCRegistrationResponseFactory extends HttpRegistrationRespons
             httpIdentityResponseBuilder.setBody(generateSuccessfulResponse(registrationResponse).toJSONString());
         } else {
             // This else part will not be reached from application logic.
-            log.error("Can't create httpIdentityResponseBuilder. identityResponse is not an instance of " +
-                    "RegistrationResponse");
+            log.error("Failed to create HTTP identity response: Invalid response type, expected RegistrationResponse");
         }
     }
 

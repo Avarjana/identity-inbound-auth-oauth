@@ -97,7 +97,7 @@ public class JWKSBasedJWTValidator implements JWTValidator {
         } catch (MalformedURLException e) {
             throw new IdentityOAuth2Exception("Provided jwks_uri: " + jwksUri + " is malformed.", e);
         } catch (KeySourceException e) {
-            log.error("Error occurred while accessing remote JWKS endpoint: " + jwksUri, e);
+            log.error("Error occurred while accessing remote JWKS endpoint: {}", jwksUri, e);
             throw new IdentityOAuth2Exception("Error occurred while accessing remote JWKS endpoint: " + jwksUri, e);
         } catch (CertificateNotYetValidException e) {
             throw new IdentityOAuth2Exception("X509Certificate is not yet valid.", e);
@@ -188,8 +188,8 @@ public class JWKSBasedJWTValidator implements JWTValidator {
             IdentityOAuth2Exception {
 
         if (log.isDebugEnabled()) {
-            log.debug("validating JWT signature using jwks_uri: " + jwksUri + " , for signing algorithm: " +
-                    algorithm);
+            log.debug("validating JWT signature using jwks_uri: {} , for signing algorithm: {}", 
+                    jwksUri, algorithm);
         }
         try {
             // set the Key Selector for the jwks_uri.

@@ -174,8 +174,8 @@ public class OAuthApplicationMgtListener extends AbstractApplicationMgtListener 
         if (serviceProvider != null) {
             try {
                 if (log.isDebugEnabled()) {
-                    log.debug("Deleting OAuth inbound data associated with application: " + applicationName
-                            + " in tenantDomain: " + tenantDomain + " during application delete.");
+                    log.debug("Deleting OAuth inbound data associated with application: {} in tenantDomain: {} during application delete.", 
+                            applicationName, tenantDomain);
                 }
                 deleteAssociatedOAuthApps(serviceProvider, tenantDomain);
             } catch (IdentityOAuthAdminException | IdentityOAuth2Exception e) {
@@ -217,8 +217,8 @@ public class OAuthApplicationMgtListener extends AbstractApplicationMgtListener 
         Set<String> associatedOAuthConsumerKeys = getOAuthAppsAssociatedWithApplication(serviceProvider);
         for (String consumerKey : associatedOAuthConsumerKeys) {
             if (log.isDebugEnabled()) {
-                log.debug("Removing OAuth application data for clientId: " + consumerKey + " associated with " +
-                        "application: " + serviceProvider.getApplicationName() + " tenantDomain: " + tenantDomain);
+                log.debug("Removing OAuth application data for clientId: {} associated with application: {} tenantDomain: {}", 
+                        consumerKey, serviceProvider.getApplicationName(), tenantDomain);
             }
             OAuthComponentServiceHolder.getInstance().getOAuthInboundConfigHandler().handleConfigDeletion(
                     consumerKey);

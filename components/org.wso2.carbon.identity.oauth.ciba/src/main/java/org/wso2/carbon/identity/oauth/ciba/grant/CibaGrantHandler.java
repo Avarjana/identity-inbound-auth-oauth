@@ -71,10 +71,12 @@ public class CibaGrantHandler extends AbstractAuthorizationGrantHandler {
             CibaDAOFactory.getInstance().getCibaAuthMgtDAO()
                     .updateStatus(cibaAuthCodeDO.getCibaAuthCodeKey(), AuthReqStatus.TOKEN_ISSUED);
             if (log.isDebugEnabled()) {
-                log.debug("Successfully updated the status of authentication request made by client:" +
+                log.debug("Successfully updated the status of authentication request made by client: {}", 
                         tokReqMsgCtx.getOauth2AccessTokenReqDTO().getClientId());
             }
+            log.info("Token issued for CIBA auth request with auth_req_id: {}", authReqId);
         } catch (CibaCoreException e) {
+            log.error("Error occurred in persisting token issued status for auth_req_id: {}", authReqId, e);
             throw new IdentityOAuth2Exception("Error occurred in persisting status for the request made with " +
                     "auth_req_id: " + authReqId, e);
         }
@@ -86,9 +88,10 @@ public class CibaGrantHandler extends AbstractAuthorizationGrantHandler {
 
         if (!super.validateGrant(tokReqMsgCtx)) {
             if (log.isDebugEnabled()) {
-                log.debug("Successful in validating grant.Validation failed for the token request made by client: " +
+                log.debug("Grant validation failed for the token request made by client: {}", 
                         tokReqMsgCtx.getOauth2AccessTokenReqDTO().getClientId());
             }
+            log.warn("CIBA grant validation failed for client: {}", tokReqMsgCtx.getOauth2AccessTokenReqDTO().getClientId());
             return false;
         }
 
@@ -108,11 +111,13 @@ public class CibaGrantHandler extends AbstractAuthorizationGrantHandler {
 
             // Check whether token is issued for the authReqId.
             if (isTokenAlreadyIssued(cibaAuthCodeDO)) {
+                log.warn("Token already issued for auth_req_id: {}", authReqId);
                 throw new IdentityOAuth2Exception(INVALID_REQUEST);
             }
 
             // Validate whether authentication  is provided with affirmative consent.
             if (!isAuthorized(cibaAuthCodeDO)) {
+                log.warn("User denied authentication for auth_req_id: {}", authReqId);
                 throw new IdentityOAuth2Exception(ACCESS_DENIED, "User denied authentication");
             }
 
@@ -122,12 +127,15 @@ public class CibaGrantHandler extends AbstractAuthorizationGrantHandler {
             // Validate whether user is authenticated.
             if (isAuthorizationPending(cibaAuthCodeDO)) {
                 updateLastPolledTime(cibaAuthCodeDO);
+                log.debug("Authorization still pending for auth_req_id: {}", authReqId);
                 throw new IdentityOAuth2Exception(AUTHORIZATION_PENDING, "Authorization pending");
             }
 
             setPropertiesForTokenGeneration(tokReqMsgCtx, cibaAuthCodeDO);
+            log.info("CIBA grant validation successful for auth_req_id: {}", authReqId);
             return true;
         } catch (CibaCoreException e) {
+            log.error("Error occurred during CIBA grant validation for auth_req_id: {}", authReqId, e);
             throw new IdentityOAuth2Exception(INVALID_PARAMETERS, e);
         }
     }
@@ -156,8 +164,11 @@ public class CibaGrantHandler extends AbstractAuthorizationGrantHandler {
             // Authentication Request ID is missing.
 
             if (log.isDebugEnabled()) {
-                log.debug("token request misses mandated parameter (auth_req_id).");
+                log.debug("Token request missing mandatory parameter (auth_req_id) from client: {}", 
+                        tokReqMsgCtx.getOauth2AccessTokenReqDTO().getClientId());
             }
+            log.warn("Missing auth_req_id parameter in CIBA token request from client: {}", 
+                    tokReqMsgCtx.getOauth2AccessTokenReqDTO().getClientId());
             throw new IdentityOAuth2Exception(MISSING_AUTH_REQ_ID);
         }
         return authReqId;
@@ -189,8 +200,10 @@ public class CibaGrantHandler extends AbstractAuthorizationGrantHandler {
         long scheduledExpiryTime = cibaAuthCodeDO.getIssuedTime().getTime() + expiresIn;
         if (currentTimeInMillis > scheduledExpiryTime) {
             if (log.isDebugEnabled()) {
-                log.debug("CIBA auth_req_id is in expired state.Token Request Denied.");
+                log.debug("CIBA auth_req_id is in expired state for authCodeKey: {}", cibaAuthCodeDO.getCibaAuthCodeKey());
             }
+            log.warn("Expired auth_req_id used in token request. Issued time: {}, expires in: {} seconds", 
+                    cibaAuthCodeDO.getIssuedTime(), cibaAuthCodeDO.getExpiresIn());
             CibaDAOFactory.getInstance().getCibaAuthMgtDAO().updateStatus(cibaAuthCodeDO.getCibaAuthCodeKey(),
                     AuthReqStatus.EXPIRED);
             throw new IdentityOAuth2Exception(EXPIRED_AUTH_REQ_ID, "Token expired");
@@ -201,7 +214,8 @@ public class CibaGrantHandler extends AbstractAuthorizationGrantHandler {
             throws IdentityOAuth2Exception {
 
         if (!actualConsumerKey.equals(reqConsumerKey)) {
-            log.debug("CIBA auth_req_id does not belong to the requested client.Token Request Denied.");
+            log.debug("CIBA auth_req_id does not belong to the requested client: {}", reqConsumerKey);
+            log.warn("Auth_req_id belongs to client: {} but request came from client: {}", actualConsumerKey, reqConsumerKey);
             throw new IdentityOAuth2Exception("Invalid client. Request ID issued for different client");
         }
     }
@@ -223,10 +237,11 @@ public class CibaGrantHandler extends AbstractAuthorizationGrantHandler {
         if (currentTimeInMillis < lastPollTimeInMillis + intervalInSec * SEC_TO_MILLISEC_FACTOR) {
             long newInterval = intervalInSec + CibaConstants.INTERVAL_INCREMENT_VALUE_IN_SEC;
             if (log.isDebugEnabled()) {
-                log.debug(" Rigorous polling for the token  made by client for request identified by " +
-                        "cibaAuthCodeDOKey : " + cibaAuthCodeDO.getCibaAuthCodeKey() + ". Updated the Polling " +
-                        "frequency on the table.");
+                log.debug("Rigorous polling detected for request with authCodeKey: {}. Updated polling interval to: {}", 
+                        cibaAuthCodeDO.getCibaAuthCodeKey(), newInterval);
             }
+            log.warn("Too frequent polling for CIBA token. Last poll: {} ms ago, required interval: {} ms", 
+                    (currentTimeInMillis - lastPollTimeInMillis), intervalInSec * SEC_TO_MILLISEC_FACTOR);
             CibaDAOFactory.getInstance().getCibaAuthMgtDAO().updatePollingInterval(cibaAuthCodeID, newInterval);
             throw new IdentityOAuth2Exception(SLOW_DOWN, "Slow down");
         }
@@ -258,13 +273,14 @@ public class CibaGrantHandler extends AbstractAuthorizationGrantHandler {
         Enum authenticationStatus = cibaAuthCodeDO.getAuthReqStatus();
         String cibaAuthCodeKey = cibaAuthCodeDO.getCibaAuthCodeKey();
         if (!authenticationStatus.equals(AuthReqStatus.AUTHENTICATED)) {
-            // If authenticated update the status as token delivered.
+            // If not authenticated yet, return true to indicate that authorization is still pending
+            if (log.isDebugEnabled()) {
+                log.debug("User not yet authenticated for request with authCodeKey: {}. Current status: {}", 
+                        cibaAuthCodeKey, authenticationStatus);
+            }
             return true;
         }
-        if (log.isDebugEnabled()) {
-            log.info("User still not authenticated for the request made by client for request uniquely identified" +
-                    " by cibaAuthCodeKey : " + cibaAuthCodeKey);
-        }
+        // User is authenticated, so authorization is not pending
         return false;
     }
 
@@ -281,10 +297,14 @@ public class CibaGrantHandler extends AbstractAuthorizationGrantHandler {
         String cibaAuthCodeDOKey = cibaAuthCodeDO.getCibaAuthCodeKey();
         if (authenticationStatus.equals(AuthReqStatus.TOKEN_ISSUED)) {
             // Token is already delivered.
+            if (log.isDebugEnabled()) {
+                log.debug("Token already issued for request with authCodeKey: {}", cibaAuthCodeDOKey);
+            }
             return true;
         }
         if (log.isDebugEnabled()) {
-            log.info("Token is not delivered for the request made for cibaAuthCodeDOKey : " + cibaAuthCodeDOKey);
+            log.debug("Token not yet issued for request with authCodeKey: {}. Current status: {}", 
+                    cibaAuthCodeDOKey, authenticationStatus);
         }
         return false;
     }

@@ -26,21 +26,31 @@ import org.wso2.carbon.identity.oauth2.client.authentication.OAuthClientAuthnSer
  */
 public class OAuthClientAuthnServiceFactory {
 
+    private static final org.apache.commons.logging.Log log =
+            org.apache.commons.logging.LogFactory.getLog(OAuthClientAuthnServiceFactory.class);
     private static final OAuthClientAuthnService SERVICE;
 
     static {
+        if (log.isDebugEnabled()) {
+            log.debug("Initializing OAuthClientAuthnService from OSGI context");
+        }
+        
         OAuthClientAuthnService oAuthClientAuthnService = (OAuthClientAuthnService) PrivilegedCarbonContext
                 .getThreadLocalCarbonContext().getOSGiService(OAuthClientAuthnService.class, null);
 
         if (oAuthClientAuthnService == null) {
+            log.error("OAuthClientAuthnService is not available from OSGI context");
             throw new IllegalStateException("OAuthClientAuthnService is not available from OSGI context.");
         }
 
+        log.info("OAuthClientAuthnService successfully initialized");
         SERVICE = oAuthClientAuthnService;
     }
 
     public static OAuthClientAuthnService getOAuthClientAuthnService() {
-
+        if (log.isDebugEnabled()) {
+            log.debug("Returning OAuthClientAuthnService instance");
+        }
         return SERVICE;
     }
 }

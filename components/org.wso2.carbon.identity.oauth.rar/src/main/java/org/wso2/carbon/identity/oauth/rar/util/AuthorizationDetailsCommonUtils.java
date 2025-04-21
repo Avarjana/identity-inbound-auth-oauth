@@ -71,7 +71,8 @@ public class AuthorizationDetailsCommonUtils {
                         getDefaultObjectMapper().getTypeFactory().constructCollectionType(Set.class, clazz));
             }
         } catch (JsonProcessingException e) {
-            log.debug("Error occurred while parsing String to AuthorizationDetails. Caused by, ", e);
+            log.debug("Error occurred while parsing String to AuthorizationDetails: {}. Error: {}", 
+                    authorizationDetailsJson, e.getMessage());
         }
         return new HashSet<>();
     }
@@ -94,7 +95,8 @@ public class AuthorizationDetailsCommonUtils {
                 return getDefaultObjectMapper().readValue(authorizationDetailJson, clazz);
             }
         } catch (JsonProcessingException e) {
-            log.debug("Error occurred while parsing String to AuthorizationDetails. Caused by, ", e);
+            log.debug("Error occurred while parsing String to AuthorizationDetail: {}. Error: {}", 
+                    authorizationDetailJson, e.getMessage());
         }
         return null;
     }
@@ -120,7 +122,7 @@ public class AuthorizationDetailsCommonUtils {
                 return getDefaultObjectMapper().writeValueAsString(authorizationDetails);
             }
         } catch (JsonProcessingException e) {
-            log.debug("Error occurred while parsing AuthorizationDetails to String. Caused by, ", e);
+            log.debug("Error occurred while converting AuthorizationDetails to JSON String. Error: {}", e.getMessage());
         }
         return EMPTY_JSON_ARRAY;
     }
@@ -146,7 +148,8 @@ public class AuthorizationDetailsCommonUtils {
                 return getDefaultObjectMapper().writeValueAsString(authorizationDetail);
             }
         } catch (JsonProcessingException e) {
-            log.debug("Error occurred while parsing AuthorizationDetail to String. Caused by, ", e);
+            log.debug("Error occurred while converting AuthorizationDetail to JSON String. Type: {}. Error: {}", 
+                    authorizationDetail != null ? authorizationDetail.getType() : "null", e.getMessage());
         }
         return EMPTY_JSON_OBJECT;
     }

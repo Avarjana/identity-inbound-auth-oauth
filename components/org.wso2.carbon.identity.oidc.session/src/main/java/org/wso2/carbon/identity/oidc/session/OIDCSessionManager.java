@@ -18,6 +18,8 @@
 
 package org.wso2.carbon.identity.oidc.session;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.wso2.carbon.base.MultitenantConstants;
 import org.wso2.carbon.identity.core.util.IdentityTenantUtil;
 import org.wso2.carbon.identity.oidc.session.cache.OIDCSessionParticipantCache;
@@ -28,6 +30,8 @@ import org.wso2.carbon.identity.oidc.session.cache.OIDCSessionParticipantCacheKe
  * This class provides session state CRUD operations.
  */
 public class OIDCSessionManager {
+
+    private static final Log log = LogFactory.getLog(OIDCSessionManager.class);
 
     /**
      * Stores the session state against the provided session id.
@@ -125,6 +129,10 @@ public class OIDCSessionManager {
         cacheEntry.setTenantDomain(tenantDomain);
 
         OIDCSessionParticipantCache.getInstance().addToCache(cacheKey, cacheEntry, tenantDomain);
+        
+        if (log.isDebugEnabled()) {
+            log.debug("Stored OIDC session state for session ID: " + sessionId + " in tenant domain: " + tenantDomain);
+        }
     }
 
     /**
@@ -160,6 +168,11 @@ public class OIDCSessionManager {
         String tenantDomain = resolveCacheTenantDomain(loginTenantDomain);
         removeOIDCSessionState(oldSessionId, tenantDomain);
         storeOIDCSessionState(newSessionId, sessionState, tenantDomain);
+        
+        if (log.isInfoEnabled()) {
+            log.info("Restored OIDC session state from session ID: " + oldSessionId + 
+                    " to new session ID: " + newSessionId + " in tenant domain: " + tenantDomain);
+        }
     }
 
     /**
@@ -175,6 +188,10 @@ public class OIDCSessionManager {
         cacheKey.setSessionID(sessionId);
 
         OIDCSessionParticipantCache.getInstance().clearCacheEntry(cacheKey, tenantDomain);
+        
+        if (log.isInfoEnabled()) {
+            log.info("Removed OIDC session state for session ID: " + sessionId + " from tenant domain: " + tenantDomain);
+        }
     }
 
     /**

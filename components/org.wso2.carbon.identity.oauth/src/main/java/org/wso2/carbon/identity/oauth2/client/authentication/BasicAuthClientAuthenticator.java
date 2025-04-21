@@ -90,8 +90,7 @@ public class BasicAuthClientAuthenticator extends AbstractOAuthClientAuthenticat
 
         try {
             if (log.isDebugEnabled()) {
-                log.debug("Authenticating client : " + oAuthClientAuthnContext.getClientId() + " with client " +
-                        "secret.");
+                log.debug("Authenticating client : {} with client secret.", oAuthClientAuthnContext.getClientId());
             }
             String tenantDomain = IdentityTenantUtil.resolveTenantDomain();
             String appOrgId = PrivilegedCarbonContext.getThreadLocalCarbonContext()
@@ -157,8 +156,7 @@ public class BasicAuthClientAuthenticator extends AbstractOAuthClientAuthenticat
             return true;
         }
         if (log.isDebugEnabled()) {
-            log.debug("Client id and secret neither present as Authorization header nor as body params. Hence " +
-                    "returning false");
+            log.debug("Client id and secret neither present as Authorization header nor as body params. Hence returning false");
         }
         return false;
     }
@@ -213,8 +211,7 @@ public class BasicAuthClientAuthenticator extends AbstractOAuthClientAuthenticat
         // The client MUST NOT use more than one authentication method in each request.
         if (isClientCredentialsExistsAsParams(bodyParams)) {
             if (log.isDebugEnabled()) {
-                log.debug("Client Id and Client Secret found in request body and Authorization header" +
-                        ". Credentials should be sent in either request body or Authorization header, not both");
+                log.debug("Client Id and Client Secret found in request body and Authorization header. Credentials should be sent in either request body or Authorization header, not both");
             }
             throw new OAuthClientAuthnException("Request body and headers contain authorization information",
                     OAuth2ErrorCodes.INVALID_REQUEST);

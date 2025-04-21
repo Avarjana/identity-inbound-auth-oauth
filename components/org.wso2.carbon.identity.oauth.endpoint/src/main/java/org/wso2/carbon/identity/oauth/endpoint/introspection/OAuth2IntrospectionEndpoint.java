@@ -78,10 +78,11 @@ public class OAuth2IntrospectionEndpoint {
         OAuth2IntrospectionResponseDTO introspectionResponse;
 
         if (log.isDebugEnabled()) {
-            log.debug("Token type hint: " + tokenTypeHint);
+            log.debug("Processing introspection request with token type hint: {}", tokenTypeHint);
         }
 
         if (StringUtils.isBlank(token)) {
+            log.warn("Token introspection request received with empty token parameter");
             introspectionResponse = new OAuth2IntrospectionResponseDTO();
             introspectionResponse.setError(INVALID_INPUT);
             triggerOnIntrospectionExceptionListeners(null, introspectionResponse);
@@ -128,9 +129,13 @@ public class OAuth2IntrospectionEndpoint {
 
         if (introspectionResponse.getError() != null) {
             if (log.isDebugEnabled()) {
-                log.debug("The error why token is made inactive: " + introspectionResponse.getError());
+                log.debug("Token introspection result: inactive token. Error: {}", introspectionResponse.getError());
             }
             return Response.status(Response.Status.OK).entity("{\"active\":false}").build();
+        }
+        
+        if (log.isDebugEnabled()) {
+            log.debug("Token introspection successful for client: {}", introspectionResponse.getClientId());
         }
 
         IntrospectionResponseBuilder respBuilder = new IntrospectionResponseBuilder()
@@ -183,13 +188,13 @@ public class OAuth2IntrospectionEndpoint {
                 if (dataProvider instanceof AbstractIdentityHandler &&
                         !((AbstractIdentityHandler) dataProvider).isEnabled()) {
                     if (log.isDebugEnabled()) {
-                        log.debug(String.format("%s data provider is not enabled.",
-                                ((AbstractIdentityHandler) dataProvider).getName()));
+                        log.debug("IntrospectionDataProvider '{}' is not enabled, skipping", 
+                                ((AbstractIdentityHandler) dataProvider).getName());
                     }
                     continue;
                 }
                 if (log.isDebugEnabled()) {
-                    log.debug("Executing introspection data provider: " + dataProvider.getClass().getName());
+                    log.debug("Executing introspection data provider: {}", dataProvider.getClass().getName());
                 }
                 try {
                     respBuilder.setAdditionalData(
@@ -205,7 +210,8 @@ public class OAuth2IntrospectionEndpoint {
                                 .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION)
                                 .resultStatus(DiagnosticLog.ResultStatus.FAILED));
                     }
-                    log.error("Error occurred while processing additional token introspection data.", e);
+                    log.error("Error occurred while processing additional token introspection data with provider '{}': {}", 
+                            dataProvider.getClass().getName(), e.getMessage(), e);
 
                     return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
                             .entity("{\"error\": \"Error occurred while building the introspection " +
@@ -227,7 +233,7 @@ public class OAuth2IntrospectionEndpoint {
                         .logDetailLevel(DiagnosticLog.LogDetailLevel.APPLICATION)
                         .resultStatus(DiagnosticLog.ResultStatus.FAILED));
             }
-            log.error("Error occurred while building the json response.", e);
+            log.error("Error occurred while building the introspection JSON response: {}", e.getMessage(), e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
                     .entity("{\"error\": \"Error occurred while building the json response.\"}").build();
         }

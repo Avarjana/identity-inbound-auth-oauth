@@ -254,9 +254,15 @@ public class OIDCLogoutServlet extends HttpServlet {
                 return;
             }
             if (skipConsent) {
+                if (log.isInfoEnabled()) {
+                    log.info("OIDC logout consent skipped for user session");
+                }
                 if (StringUtils.isNotBlank(clientId) || StringUtils.isNotBlank(idTokenHint)) {
                     redirectURL = processLogoutRequest(request, response);
                     if (StringUtils.isNotBlank(redirectURL)) {
+                        if (log.isInfoEnabled()) {
+                            log.info("Redirecting user to post-logout redirect URI");
+                        }
                         response.sendRedirect(getRedirectURL(redirectURL, request));
                         return;
                     }
@@ -453,7 +459,7 @@ public class OIDCLogoutServlet extends HttpServlet {
             }
             return false;
         } catch (Exception e) {
-            log.error("Error occurred while validating id token signature.");
+            log.error("Error occurred while validating ID token signature for logout request.");
             return false;
         }
     }
@@ -665,7 +671,7 @@ public class OIDCLogoutServlet extends HttpServlet {
         try {
             triggerLogoutHandlersForPreLogout(request, response);
         } catch (OIDCSessionManagementException e) {
-            log.error("Error executing logout handlers on pre logout.");
+            log.error("Error executing logout handlers on pre logout. Logout flow may be incomplete.");
             if (log.isDebugEnabled()) {
                 log.debug("Error executing logout handlers on pre logout.", e);
             }
@@ -698,7 +704,7 @@ public class OIDCLogoutServlet extends HttpServlet {
             authenticationRequest.setCommonAuthCallerPath(
                     ServiceURLBuilder.create().addPath(OIDC_LOGOUT_ENDPOINT).build().getRelativeInternalURL());
         } catch (URLBuilderException e) {
-            log.error("Error building commonauth caller path to send logout request to framework.", e);
+            log.error("Error building commonauth caller path to send logout request to authentication framework", e);
             if (logoutContext.isAPIBasedLogout()) {
                 handleAPIBasedLogoutErrorResponse(new AuthServiceException(
                         getDefaultError(false).code(),
@@ -754,6 +760,10 @@ public class OIDCLogoutServlet extends HttpServlet {
     private void handleLogoutResponseFromFramework(HttpServletRequest request, HttpServletResponse response,
                                                    LogoutContext logoutContext)
             throws IOException {
+        
+        if (log.isInfoEnabled()) {
+            log.info("Processing OIDC logout response from authentication framework");
+        }
 
         if (logoutContext.isAPIBasedLogout() && logoutContext.isAPIBasedLogoutWithoutCookies()) {
             clearTokenBindingElements(logoutContext.getClientId(), request, response);
@@ -791,7 +801,7 @@ public class OIDCLogoutServlet extends HttpServlet {
             try {
                 triggerLogoutHandlersForPostLogout(request, response);
             } catch (OIDCSessionManagementException e) {
-                log.error("Error executing logout handlers on post logout.");
+                log.error("Error executing logout handlers on post logout. Some logout cleanup operations may not have completed.");
                 if (log.isDebugEnabled()) {
                     log.debug("Error executing logout handlers on post logout.", e);
                 }
@@ -957,10 +967,15 @@ public class OIDCLogoutServlet extends HttpServlet {
      * @param tenantDomain    Tenant Domain.
      */
     private void doBackChannelLogout(String opbsCookieValue, String tenantDomain) {
-
+        
+        if (log.isInfoEnabled()) {
+            log.info("Initiating back-channel logout for session: " + 
+                    (opbsCookieValue != null ? opbsCookieValue : "unknown") + 
+                    " in tenant: " + (tenantDomain != null ? tenantDomain : "unknown"));
+        }
         LogoutRequestSender.getInstance().sendLogoutRequests(opbsCookieValue, tenantDomain);
         if (log.isDebugEnabled()) {
-            log.debug("Sending backchannel logout request.");
+            log.debug("Back-channel logout requests sent successfully.");
         }
     }
 

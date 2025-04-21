@@ -43,10 +43,20 @@ public class CacheBackedParDAO implements ParMgtDAO {
     public void persistRequestData(String requestURIReference, String clientId, long expiresIn,
                                    Map<String, String> parameters) throws ParCoreException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Persisting PAR request with reference: {} for client: {} with cache support", 
+                    requestURIReference, clientId);
+        }
+        
         ParRequestCacheEntry parRequestCacheEntry = new ParRequestCacheEntry(requestURIReference, parameters,
                 expiresIn, clientId);
         parMgtDAO.persistRequestData(requestURIReference, clientId, expiresIn, parameters);
         parCache.addToCache(requestURIReference, parRequestCacheEntry);
+        
+        if (log.isDebugEnabled()) {
+            log.debug("Successfully added PAR request to cache with reference: {} for client: {}", 
+                    requestURIReference, clientId);
+        }
     }
 
     @Override
@@ -76,7 +86,15 @@ public class CacheBackedParDAO implements ParMgtDAO {
     @Override
     public void removeRequestData(String requestURIReference) throws ParCoreException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Removing PAR request with reference: {} from cache and database", requestURIReference);
+        }
+        
         parCache.clearCacheEntry(requestURIReference);
         parMgtDAO.removeRequestData(requestURIReference);
+        
+        if (log.isDebugEnabled()) {
+            log.debug("Successfully removed PAR request with reference: {} from cache and database", requestURIReference);
+        }
     }
 }

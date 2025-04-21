@@ -56,28 +56,35 @@ public class DefaultOIDCProcessor implements OIDCProcessor {
     public OIDProviderConfigResponse getResponse(HttpServletRequest request, String tenantDomain) throws
             OIDCDiscoveryEndPointException, ServerConfigurationException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Processing OIDC discovery request for tenant domain: {}", tenantDomain);
+        }
         OIDCProviderRequestBuilder requestBuilder = new DefaultOIDCProviderRequestBuilder();
         OIDProviderRequest requestObject = requestBuilder.buildRequest(request, tenantDomain);
         ProviderConfigBuilder responseBuilder = new ProviderConfigBuilder();
-        return responseBuilder.buildOIDProviderConfig(requestObject);
+        OIDProviderConfigResponse response = responseBuilder.buildOIDProviderConfig(requestObject);
+        if (log.isDebugEnabled()) {
+            log.debug("Successfully built OIDC provider configuration for tenant: {}", tenantDomain);
+        }
+        return response;
     }
 
     public int handleError(OIDCDiscoveryEndPointException error) {
 
         if (log.isDebugEnabled()) {
-            log.debug(error);
+            log.debug("Handling OIDC discovery error", error);
         }
         String errorCode = error.getErrorCode();
         if (errorCode.equals(OIDCDiscoveryEndPointException.ERROR_CODE_NO_OPENID_PROVIDER_FOUND)) {
-            log.error(OIDCDiscoveryEndPointException.ERROR_MESSAGE_NO_OPENID_PROVIDER_FOUND, error);
+            log.error("Error in OIDC discovery: {}", OIDCDiscoveryEndPointException.ERROR_MESSAGE_NO_OPENID_PROVIDER_FOUND, error);
         } else if (errorCode.equals(OIDCDiscoveryEndPointException.ERROR_CODE_INVALID_REQUEST)) {
-            log.error(OIDCDiscoveryEndPointException.ERROR_MESSAGE_INVALID_REQUEST, error);
+            log.error("Error in OIDC discovery: {}", OIDCDiscoveryEndPointException.ERROR_MESSAGE_INVALID_REQUEST, error);
         } else if (errorCode.equals(OIDCDiscoveryEndPointException.ERROR_CODE_INVALID_TENANT)) {
-            log.error(OIDCDiscoveryEndPointException.ERROR_MESSAGE_INVALID_TENANT, error);
+            log.error("Error in OIDC discovery: {}", OIDCDiscoveryEndPointException.ERROR_MESSAGE_INVALID_TENANT, error);
         } else if (errorCode.equals(OIDCDiscoveryEndPointException.ERROR_CODE_JSON_EXCEPTION)) {
-            log.error(OIDCDiscoveryEndPointException.ERROR_MESSAGE_JSON_EXCEPTION, error);
+            log.error("Error in OIDC discovery: {}", OIDCDiscoveryEndPointException.ERROR_MESSAGE_JSON_EXCEPTION, error);
         } else {
-            log.error("Internal server error occurred.", error);
+            log.error("Internal server error occurred in OIDC discovery endpoint", error);
         }
         return HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
     }

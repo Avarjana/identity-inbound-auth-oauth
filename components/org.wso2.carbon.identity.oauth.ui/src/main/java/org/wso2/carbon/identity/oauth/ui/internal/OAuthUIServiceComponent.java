@@ -48,30 +48,37 @@ public class OAuthUIServiceComponent {
     @SuppressWarnings("unchecked")
     protected void activate(ComponentContext context) {
 
-        log.debug("Activating Identity OAuth UI bundle.");
+        if (log.isDebugEnabled()) {
+            log.debug("Activating Identity OAuth UI bundle.");
+        }
 
         HttpService httpService = OAuthUIServiceComponentHolder.getInstance().getHttpService();
 
         try {
-
             // Register OAuth 1.a servlet
             Servlet oauth1aServlet = new ContextPathServletAdaptor(new OAuthServlet(), OAUTH_URL);
             httpService.registerServlet(OAUTH_URL, oauth1aServlet, null, null);
-            log.debug("Successfully registered an instance of OAuthServlet");
+            
+            if (log.isDebugEnabled()) {
+                log.debug("Successfully registered an instance of OAuthServlet at path: {}", OAUTH_URL);
+            }
 
         } catch (Exception e) {
-            String errMsg = "Error when registering an OAuth endpoint via the HttpService.";
+            String errMsg = "Error when registering OAuth endpoint via the HttpService at path: " + OAUTH_URL;
             log.error(errMsg, e);
             throw new RuntimeException(errMsg, e);
         }
 
-        log.debug("Successfully activated Identity OAuth UI bundle.");
-
+        if (log.isInfoEnabled()) {
+            log.info("Successfully activated Identity OAuth UI bundle");
+        }
     }
 
     protected void deactivate(ComponentContext context) {
 
-        log.debug("Identity OAuth UI bundle is deactivated");
+        if (log.isDebugEnabled()) {
+            log.debug("Identity OAuth UI bundle is deactivated");
+        }
     }
 
     @Reference(
@@ -102,13 +109,17 @@ public class OAuthUIServiceComponent {
     protected void setConfigurationContextService(ConfigurationContextService configurationContextService) {
 
         OAuthUIServiceComponentHolder.getInstance().setConfigurationContextService(configurationContextService);
-        log.debug("ConfigurationContextService Instance was set.");
+        if (log.isDebugEnabled()) {
+            log.debug("ConfigurationContextService instance was set in OAuth UI bundle");
+        }
     }
 
     protected void unsetConfigurationContextService(ConfigurationContextService configurationContextService) {
 
         OAuthUIServiceComponentHolder.getInstance().setConfigurationContextService(null);
-        log.debug("ConfigurationContextService Instance was unset.");
+        if (log.isDebugEnabled()) {
+            log.debug("ConfigurationContextService instance was unset in OAuth UI bundle");
+        }
     }
 
     @Reference(
@@ -121,12 +132,16 @@ public class OAuthUIServiceComponent {
     protected void setServerConfigurationService(ServerConfigurationService serverConfigService) {
 
         OAuthUIServiceComponentHolder.getInstance().setServerConfigurationService(serverConfigService);
-        log.debug("ServerConfigurationService instance was set.");
+        if (log.isDebugEnabled()) {
+            log.debug("ServerConfigurationService instance was set in OAuth UI bundle");
+        }
     }
 
     protected void unsetServerConfigurationService(ServerConfigurationService serverConfigService) {
 
         OAuthUIServiceComponentHolder.getInstance().setServerConfigurationService(null);
-        log.debug("ServerConfigurationService instance was unset.");
+        if (log.isDebugEnabled()) {
+            log.debug("ServerConfigurationService instance was unset in OAuth UI bundle");
+        }
     }
 }

@@ -898,13 +898,19 @@ public class DCRMService {
 
         ServiceProvider serviceProvider = null;
         try {
+            if (log.isDebugEnabled()) {
+                log.debug("Checking if service provider exists: {} in tenant: {}", serviceProviderName, tenantDomain);
+            }
             serviceProvider = getServiceProvider(serviceProviderName, tenantDomain);
         } catch (DCRMException e) {
-            log.error(
-                    "Error while retrieving service provider: " + serviceProviderName + " in tenant: " + tenantDomain);
+            log.error("Error while retrieving service provider: {} in tenant: {}", serviceProviderName, tenantDomain, e);
         }
 
-        return serviceProvider != null;
+        boolean exists = serviceProvider != null;
+        if (log.isDebugEnabled()) {
+            log.debug("Service provider {} exists in tenant {}: {}", serviceProviderName, tenantDomain, exists);
+        }
+        return exists;
     }
 
     /**
@@ -1000,10 +1006,15 @@ public class DCRMService {
 
         try {
             if (log.isDebugEnabled()) {
-                log.debug("Delete OAuth application with the consumer key: " + appDTO.getOauthConsumerKey());
+                log.debug("Deleting OAuth application with consumer key: {}", appDTO.getOauthConsumerKey());
             }
             oAuthAdminService.removeOAuthApplicationData(appDTO.getOauthConsumerKey());
+            if (log.isInfoEnabled()) {
+                log.info("Successfully deleted OAuth application with consumer key: {}", appDTO.getOauthConsumerKey());
+            }
         } catch (IdentityOAuthAdminException e) {
+            log.error("Error while deleting OAuth application with consumer key: {}", 
+                    appDTO.getOauthConsumerKey(), e);
             throw new DCRMException("Error while deleting the OAuth application with consumer key: " +
                     appDTO.getOauthConsumerKey(), e);
         }
@@ -1012,28 +1023,32 @@ public class DCRMService {
                 .getApplicationManagementService();
         try {
             if (log.isDebugEnabled()) {
-                log.debug("Get service provider with application name: " + appDTO.getApplicationName());
+                log.debug("Getting service provider with application name: {}", appDTO.getApplicationName());
             }
             ServiceProvider serviceProvider = applicationManagementService.getServiceProvider(appDTO
                     .getApplicationName(), tenantDomain);
             if (serviceProvider == null) {
                 if (log.isDebugEnabled()) {
-                    log.debug("There is no service provider exists with the name: " + appDTO.getApplicationName());
+                    log.debug("No service provider exists with name: {}", appDTO.getApplicationName());
                 }
             } else if (serviceProvider.getInboundAuthenticationConfig().getInboundAuthenticationRequestConfigs()
                     .length == 0) {
                 if (log.isDebugEnabled()) {
-                    log.debug("Delete the service provider: " + serviceProvider.getApplicationName());
+                    log.debug("Deleting service provider: {}", serviceProvider.getApplicationName());
                 }
                 applicationManagementService.deleteApplication(serviceProvider.getApplicationName(), tenantDomain,
                         username);
+                if (log.isInfoEnabled()) {
+                    log.info("Successfully deleted service provider: {}", serviceProvider.getApplicationName());
+                }
             } else {
                 if (log.isDebugEnabled()) {
-                    log.debug("Service provider with name: " + serviceProvider.getApplicationName() +
-                            " can not be deleted since it has association with other application/s");
+                    log.debug("Service provider: {} cannot be deleted as it has associations with other applications", 
+                            serviceProvider.getApplicationName());
                 }
             }
         } catch (IdentityApplicationManagementException e) {
+            log.error("Error deleting service provider with name: {}", appDTO.getApplicationName(), e);
             throw new DCRMException("Error while deleting the service provider with the name: " +
                     appDTO.getApplicationName(), e);
         }
@@ -1182,22 +1197,36 @@ public class DCRMService {
     private void validateSSASignature(String softwareStatement) throws DCRMClientException,
             IdentityOAuth2Exception, DCRMServerException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Validating software statement signature");
+        }
+        
         DCRConfiguration dcrConfiguration = dcrConfigurationMgtService.getDCRConfiguration();
         String jwksURL = dcrConfiguration.getSsaJwks();
         if (StringUtils.isNotEmpty(jwksURL)) {
             try {
+                if (log.isDebugEnabled()) {
+                    log.debug("Parsing software statement JWT with JWKS URL: {}", jwksURL);
+                }
                 SignedJWT signedJWT = SignedJWT.parse(softwareStatement);
-                if (!JWTSignatureValidationUtils.validateUsingJWKSUri(signedJWT, jwksURL)) {
+                boolean isValid = JWTSignatureValidationUtils.validateUsingJWKSUri(signedJWT, jwksURL);
+                
+                if (!isValid) {
+                    log.error("Software statement signature validation failed");
                     throw new DCRMClientException(DCRMConstants.ErrorCodes.INVALID_SOFTWARE_STATEMENT,
                             DCRMConstants.ErrorMessages.SIGNATURE_VALIDATION_FAILED.getMessage());
                 }
+                
+                if (log.isDebugEnabled()) {
+                    log.debug("Software statement signature validation successful");
+                }
             } catch (ParseException e) {
+                log.error("Error parsing software statement JWT", e);
                 throw new DCRMClientException(DCRMConstants.ErrorCodes.INVALID_SOFTWARE_STATEMENT,
                         DCRMConstants.ErrorMessages.SIGNATURE_VALIDATION_FAILED.getMessage(), e);
             }
-
         } else {
-            log.debug("Skipping Software Statement signature validation as jwks_uri is not configured.");
+            log.debug("Skipping software statement signature validation as jwks_uri is not configured");
         }
     }
 
@@ -1209,10 +1238,21 @@ public class DCRMService {
      */
     private Map<String, Object> getSSAClaims(String softwareStatement) throws DCRMClientException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Extracting claims from software statement");
+        }
+        
         try {
             SignedJWT signedJWT = SignedJWT.parse(softwareStatement);
-            return signedJWT.getJWTClaimsSet().getClaims();
+            Map<String, Object> claims = signedJWT.getJWTClaimsSet().getClaims();
+            
+            if (log.isDebugEnabled()) {
+                log.debug("Successfully extracted {} claims from software statement", claims.size());
+            }
+            
+            return claims;
         } catch (ParseException e) {
+            log.error("Failed to parse software statement and extract claims", e);
             throw new DCRMClientException(DCRMConstants.ErrorCodes.INVALID_SOFTWARE_STATEMENT,
                     DCRMConstants.ErrorMessages.FAILED_TO_READ_SSA.getMessage(), e);
         }

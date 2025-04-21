@@ -47,14 +47,17 @@ public class ParServiceComponent {
                     parAuthServiceImpl, null);
             context.getBundleContext().registerService(OAuthAuthorizationRequestBuilder.class.getName(),
                     new ParRequestBuilder(), null);
-            log.debug("PAR component bundle is activated.");
+            
+            log.info("Pushed Authorization Request (PAR) component is activated successfully");
+            if (log.isDebugEnabled()) {
+                log.debug("Registered PAR auth service and request builder in the OSGI context");
+            }
         } catch (Throwable e) {
-            log.error("Error occurred while activating PAR component.", e);
+            log.error("Error occurred while activating Pushed Authorization Request (PAR) component", e);
         }
     }
 
     protected void deactivate(ComponentContext context) {
-
-        log.debug("PAR component bundle is deactivated.");
+        log.info("Pushed Authorization Request (PAR) component is deactivated");
     }
 }

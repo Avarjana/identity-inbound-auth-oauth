@@ -46,7 +46,7 @@ public class OIDCDCRProcessor extends DCRProcessor {
     public IdentityResponse.IdentityResponseBuilder process(IdentityRequest identityRequest) throws DCRException {
 
         if (log.isDebugEnabled()) {
-            log.debug("Request processing started by OIDCDCRProcessor.");
+            log.debug("OIDC DCR request processing started.");
         }
 
         boolean isIdentityConnectDCREnabled =
@@ -61,14 +61,21 @@ public class OIDCDCRProcessor extends DCRProcessor {
                         "enable = true");
             }
             String errorMessage = "/identity/connect/register API was deprecated.";
+            log.warn("Attempt to access deprecated OIDC DCR endpoint: {}", errorMessage);
             throw IdentityException.error(RegistrationException.class, ErrorCodes.GONE.toString(), errorMessage);
         }
 
         OIDCDCRMessageContext oidcdcrMessageContext = new OIDCDCRMessageContext(identityRequest);
         IdentityResponse.IdentityResponseBuilder identityResponseBuilder = null;
         if (identityRequest instanceof OIDCRegistrationRequest) {
+            if (log.isDebugEnabled()) {
+                log.debug("Processing OIDC registration request");
+            }
             identityResponseBuilder = registerOAuthApplication(oidcdcrMessageContext);
         } else {
+            if (log.isDebugEnabled()) {
+                log.debug("Request not an OIDC registration request, delegating to parent processor");
+            }
             identityResponseBuilder = super.process(identityRequest);
         }
 
@@ -94,7 +101,7 @@ public class OIDCDCRProcessor extends DCRProcessor {
             }
         }
         if (log.isDebugEnabled()) {
-            log.debug("canHandle " + canHandle + " by OIDCDCRProcessor.");
+            log.debug("OIDCDCRProcessor can handle request: {}", canHandle);
         }
         return canHandle;
     }

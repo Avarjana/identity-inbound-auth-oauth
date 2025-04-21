@@ -100,34 +100,52 @@ public class ClientAttestationProxy extends AbstractPhaseInterceptor<Message> {
 
         // Check if this is an API-based authentication request
         if (canHandle(request, message, bodyContentParams)) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Processing client attestation for request path: {}", message.get(Message.REQUEST_URI));
+            }
 
-            String clientId =  extractClientId(request, bodyContentParams);
+            String clientId = extractClientId(request, bodyContentParams);
 
             if (StringUtils.isEmpty(clientId)) {
-
+                LOG.error("Client ID not found in the authentication request");
                 throw new WebApplicationException(buildResponse("Client Id not found in the request",
                         Response.Status.BAD_REQUEST));
             } else {
                 try {
-                    ServiceProvider serviceProvider =  getServiceProvider(clientId,
-                            IdentityTenantUtil.resolveTenantDomain());
+                    String tenantDomain = IdentityTenantUtil.resolveTenantDomain();
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug("Retrieving service provider for client ID: {} in tenant: {}", clientId, tenantDomain);
+                    }
+                    
+                    ServiceProvider serviceProvider = getServiceProvider(clientId, tenantDomain);
                     ClientAttestationContext clientAttestationContext;
                     // Attestation validation should be performed only if API-based authentication is enabled.
                     if (serviceProvider.isAPIBasedAuthenticationEnabled()) {
+                        if (LOG.isDebugEnabled()) {
+                            LOG.debug("API-based authentication is enabled for application with client ID: {}", clientId);
+                        }
+                        
                         // Validate the attestation header and obtain client attestation context
                         clientAttestationContext = ClientAttestationServiceHolder
                                 .getClientAttestationService().validateAttestation(attestationHeader,
                                         serviceProvider.getApplicationResourceId(),
-                                        IdentityTenantUtil.resolveTenantDomain());
+                                        tenantDomain);
+                        
+                        if (LOG.isDebugEnabled()) {
+                            LOG.debug("Attestation validation completed for client ID: {}, attested: {}", 
+                                    clientId, clientAttestationContext.isAttested());
+                        }
                     } else {
                         /* In order for client attestation to be enabled it requires API-based authentication to be
                          enabled. Therefore, if API-based authentication is disabled, client attestation is disabled.*/
+                        LOG.info("API-based authentication is disabled for client ID: {}. Skipping attestation validation.", clientId);
                         clientAttestationContext = new ClientAttestationContext(false);
                         clientAttestationContext.setAttested(false);
                     }
                     // Set the client attestation context in the HTTP request.
                     setContextToRequest(request, clientAttestationContext);
                 } catch (ClientAttestationMgtException e) {
+                    LOG.error("Error during client attestation validation for client ID: {}", clientId, e);
                     // Create a Response object with a 400 status code and a detailed message
                     Response response = Response
                             .status(Response.Status.BAD_REQUEST)
@@ -149,8 +167,15 @@ public class ClientAttestationProxy extends AbstractPhaseInterceptor<Message> {
      * @return True if the interceptor can handle the request, false otherwise.
      */
     private boolean canHandle(HttpServletRequest request, Message message, Map<String, List> bodyContentParams) {
-
-        return isMatchesEndPoint(message) && isApiBasedAuthnRequest(request, bodyContentParams);
+        boolean matchesEndpoint = isMatchesEndPoint(message);
+        boolean isApiBasedAuth = isApiBasedAuthnRequest(request, bodyContentParams);
+        
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Request evaluation - Matches endpoint: {}, API-based authentication: {}", 
+                    matchesEndpoint, isApiBasedAuth);
+        }
+        
+        return matchesEndpoint && isApiBasedAuth;
     }
 
     /**
@@ -160,10 +185,17 @@ public class ClientAttestationProxy extends AbstractPhaseInterceptor<Message> {
      * @return True if the request path matches the authorization endpoint path, false otherwise.
      */
     private boolean isMatchesEndPoint(Message message) {
-
         String requestPath = (String) message.get(Message.REQUEST_URI);
-        requestPath = removeTrailingSlash(requestPath);
-        return StringUtils.equalsIgnoreCase(requestPath, AUTHZ_ENDPOINT_PATH);
+        String normalizedPath = removeTrailingSlash(requestPath);
+        
+        boolean matches = StringUtils.equalsIgnoreCase(normalizedPath, AUTHZ_ENDPOINT_PATH);
+        
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Endpoint matching - Request path: {}, Normalized path: {}, Matches authorization endpoint: {}", 
+                    requestPath, normalizedPath, matches);
+        }
+        
+        return matches;
     }
 
 
@@ -178,18 +210,30 @@ public class ClientAttestationProxy extends AbstractPhaseInterceptor<Message> {
      * @return True if the authentication request is API-based, false otherwise.
      */
     private boolean isApiBasedAuthnRequest(HttpServletRequest request, Map<String, List> bodyContentParams) {
-
+        boolean isApiBasedAuth = false;
+        String responseMode = null;
+        boolean fromBodyParams = false;
+        
         // Check if the 'response_mode' parameter is present in the parsed body content parameters.
         if (bodyContentParams.containsKey(RESPONSE_MODE) && !bodyContentParams.get(RESPONSE_MODE).isEmpty()) {
             // Retrieve the 'response_mode' parameter value from the request body.
-            String responseMode = bodyContentParams.get(RESPONSE_MODE).get(0).toString();
+            responseMode = bodyContentParams.get(RESPONSE_MODE).get(0).toString();
+            fromBodyParams = true;
             // Check if the 'response_mode' parameter value is equal to 'direct'.
-            return responseMode.equalsIgnoreCase(DIRECT);
+            isApiBasedAuth = responseMode.equalsIgnoreCase(DIRECT);
+        } else {
+            // If 'response_mode' is not found in the body content parameters, fall back to the request parameters.
+            responseMode = request.getParameter(RESPONSE_MODE);
+            // Check if the 'response_mode' parameter value in the request is equal to 'direct'.
+            isApiBasedAuth = StringUtils.equals(DIRECT, responseMode);
         }
-
-        // If 'response_mode' is not found in the body content parameters, fall back to the request parameters.
-        // Check if the 'response_mode' parameter value in the request is equal to 'direct'.
-        return StringUtils.equals(DIRECT, request.getParameter(RESPONSE_MODE));
+        
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("API-based authentication check - Response mode: {}, Source: {}, Is API-based: {}", 
+                    responseMode, fromBodyParams ? "body parameters" : "request parameters", isApiBasedAuth);
+        }
+        
+        return isApiBasedAuth;
     }
 
     /**
@@ -202,16 +246,30 @@ public class ClientAttestationProxy extends AbstractPhaseInterceptor<Message> {
      * @return The extracted client ID.
      */
     private String extractClientId(HttpServletRequest request, Map<String, List> bodyContentParams) {
-
+        String clientId = null;
+        String source = null;
+        
         // Check if the 'client_id' parameter is present in the parsed body content parameters.
         if (bodyContentParams.containsKey(CLIENT_ID) && !bodyContentParams.get(CLIENT_ID).isEmpty()) {
             // Retrieve and return the 'client_id' parameter value from the request body.
-            return bodyContentParams.get(CLIENT_ID).get(0).toString();
+            clientId = bodyContentParams.get(CLIENT_ID).get(0).toString();
+            source = "body parameters";
+        } else {
+            // If 'client_id' is not found in the body content parameters, fall back to the request parameters.
+            // Return the value of the 'client_id' parameter as a default.
+            clientId = request.getParameter(CLIENT_ID);
+            source = "request parameters";
         }
-
-        // If 'client_id' is not found in the body content parameters, fall back to the request parameters.
-        // Return the value of the 'client_id' parameter as a default.
-        return request.getParameter(CLIENT_ID);
+        
+        if (LOG.isDebugEnabled()) {
+            if (clientId != null) {
+                LOG.debug("Client ID extracted from {}: {}", source, clientId);
+            } else {
+                LOG.debug("Client ID not found in request");
+            }
+        }
+        
+        return clientId;
     }
 
 
@@ -222,9 +280,20 @@ public class ClientAttestationProxy extends AbstractPhaseInterceptor<Message> {
      * @return Body parameter of the incoming request message
      */
     protected Map<String, List> getContentParams(Message message) {
-
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Extracting content parameters from JAX-RS message");
+        }
+        
         Map<String, List> contentMap = new HashMap<>();
         List contentList = message.getContent(List.class);
+        
+        if (contentList == null) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("No content list found in message");
+            }
+            return contentMap;
+        }
+        
         contentList.forEach(item -> {
             if (item instanceof MetadataMap) {
                 MetadataMap metadataMap = (MetadataMap) item;
@@ -235,6 +304,11 @@ public class ClientAttestationProxy extends AbstractPhaseInterceptor<Message> {
                 });
             }
         });
+        
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Extracted {} content parameters from request", contentMap.size());
+        }
+        
         return contentMap;
     }
 
@@ -245,10 +319,21 @@ public class ClientAttestationProxy extends AbstractPhaseInterceptor<Message> {
      * @param clientAttestationContext  The Client Attestation context to be added to the request.
      */
     private void setContextToRequest(HttpServletRequest request, ClientAttestationContext clientAttestationContext) {
+        if (request == null) {
+            LOG.error("Cannot set Client Attestation context: request is null");
+            return;
+        }
+        
+        if (clientAttestationContext == null) {
+            LOG.error("Cannot set Client Attestation context: context is null");
+            return;
+        }
 
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Setting Client Attestation context to request");
+            LOG.debug("Setting Client Attestation context to request. Attested: {}", 
+                    clientAttestationContext.isAttested());
         }
+        
         // Add the Client Attestation context as an attribute to the HttpServletRequest
         request.setAttribute(CLIENT_ATTESTATION_CONTEXT, clientAttestationContext);
     }
@@ -265,21 +350,29 @@ public class ClientAttestationProxy extends AbstractPhaseInterceptor<Message> {
 
         ServiceProvider serviceProvider;
         try {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Retrieving service provider by client ID: {} in tenant: {}", clientId, tenantDomain);
+            }
             serviceProvider = ClientAttestationServiceHolder.getApplicationManagementService()
                     .getServiceProviderByClientId(clientId, OAUTH2, tenantDomain);
         } catch (IdentityApplicationManagementClientException e) {
+            LOG.error("Invalid client ID: {} in tenant: {}. Error: {}", clientId, tenantDomain, e.getMessage());
             throw new WebApplicationException(
                     buildResponse("Invalid client Id : " + clientId,
                             Response.Status.BAD_REQUEST));
         } catch (IdentityApplicationManagementException e) {
+            LOG.error("Error retrieving service provider for client ID: {} in tenant: {}", clientId, tenantDomain, e);
             throw new WebApplicationException(
                         buildResponse("Internal Server Error when retrieving service provider.",
                                 Response.Status.INTERNAL_SERVER_ERROR));
         }
         if (serviceProvider == null) {
-
+            LOG.warn("No service provider found for client ID: {} in tenant: {}", clientId, tenantDomain);
             throw new WebApplicationException(buildResponse("Service provider not found.",
                     Response.Status.BAD_REQUEST));
+        }
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Successfully retrieved service provider for client ID: {} in tenant: {}", clientId, tenantDomain);
         }
         return serviceProvider;
     }
@@ -292,6 +385,7 @@ public class ClientAttestationProxy extends AbstractPhaseInterceptor<Message> {
      * @return A JAX-RS Response object representing the error.
      */
     private Response buildResponse(String errorDescription, Response.Status status) {
+        LOG.warn("Building error response - Status: {}, Description: {}", status, errorDescription);
 
         String errorJSON = new JSONObject().put(ERROR_DESCRIPTION, errorDescription)
                 .put(ERROR, status.getReasonPhrase()).toString();
@@ -300,9 +394,19 @@ public class ClientAttestationProxy extends AbstractPhaseInterceptor<Message> {
     }
 
     private String removeTrailingSlash(String url) {
-
-        if (url != null && url.endsWith(SLASH)) {
-            return url.substring(0, url.length() - 1);
+        if (url == null) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("URL is null when attempting to remove trailing slash");
+            }
+            return null;
+        }
+        
+        if (url.endsWith(SLASH)) {
+            String result = url.substring(0, url.length() - 1);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Removed trailing slash from URL: {} -> {}", url, result);
+            }
+            return result;
         }
         return url;
     }

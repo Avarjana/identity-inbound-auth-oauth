@@ -44,19 +44,21 @@ public class CibaServiceComponent {
         try {
             context.getBundleContext().registerService(CibaAuthService.class.getName(),
                     new CibaAuthServiceImpl(), null);
+            log.info("CIBA component bundle activated successfully");
             if (log.isDebugEnabled()) {
-                log.debug("CIBA component bundle is activated.");
+                log.debug("CIBA authentication service registered in OSGi runtime");
             }
         } catch (Throwable e) {
-            log.error("Error occurred while activating CIBA Component.", e);
+            log.error("Error occurred while activating CIBA component", e);
         }
     }
 
     @Deactivate
     protected void deactivate(ComponentContext context) {
 
+        log.info("CIBA component bundle deactivated");
         if (log.isDebugEnabled()) {
-            log.debug("CIBA component bundle is deactivated.");
+            log.debug("CIBA authentication service unregistered from OSGi runtime");
         }
     }
 }

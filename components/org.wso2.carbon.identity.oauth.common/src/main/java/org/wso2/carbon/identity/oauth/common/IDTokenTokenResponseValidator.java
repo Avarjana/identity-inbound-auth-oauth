@@ -18,9 +18,19 @@
 
 package org.wso2.carbon.identity.oauth.common;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+
 /**
  * Validator for IDtoken token response.
  */
 public class IDTokenTokenResponseValidator extends IDTokenResponseValidator {
 
+    private static final Log log = LogFactory.getLog(IDTokenTokenResponseValidator.class);
+    
+    public IDTokenTokenResponseValidator() {
+        if (log.isDebugEnabled()) {
+            log.debug("Initialized IDTokenTokenResponseValidator");
+        }
+    }
 }
